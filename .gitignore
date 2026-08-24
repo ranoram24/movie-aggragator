@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Virtual environments
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Local database (regenerate with create_table.py)
+*.db
+
+# Scraped page dumps (regenerate with explore_cinema_city.py)
+cinema_city_movies.html
+
+# Local backups
+*.bak

@@ -1,0 +1,223 @@
+﻿================================================================================
+CINEMA CITY SCRAPER - THE /Events 404 BUG
+Debug notes - 2026-08-25
+================================================================================
+
+
+1. THE SYMPTOM
+--------------------------------------------------------------------------------
+Two internal AJAX endpoints worked fine from Python:
+
+    /tickets/MoviesByTheaterAndVenueType?theaterId=1&venueTypeId=1       -> 200 JSON
+    /tickets/GetDatesByTheaterMovieVenueType?theaterId=1&movieid=6234    -> 200 JSON
+
+A third consistently returned 404, even though the same URL appeared to work
+in the browser:
+
+    /Events?TheatreId=1170&VenueTypeId=1&MovieId=6234&Date=25/08/2026    -> 404
+
+
+2. THE ROOT CAUSE
+--------------------------------------------------------------------------------
+The path was wrong. The endpoint is /tickets/Events, not /Events.
+
+    https://www.cinema-city.co.il/Events?...           -> 404  (always)
+    https://www.cinema-city.co.il/tickets/Events?...   -> 200  (always)
+
+That was the entire bug. The endpoint lives in the same /tickets/ directory as
+the two endpoints that were already working - which in hindsight was the clue
+sitting in plain sight.
+
+THE FIX (one line):
+
+    -   f"https://www.cinema-city.co.il/Events"
+    +   f"https://www.cinema-city.co.il/tickets/Events"
+
+
+3. WHY THE BROWSER MISLED ME
+--------------------------------------------------------------------------------
+Chrome DevTools' Network tab "Name" column shows only the LAST PATH SEGMENT
+plus the query string. So a request to:
+
+    https://www.cinema-city.co.il/tickets/Events?TheatreId=1170&...
+
+is displayed in that column as just:
+
+    Events?TheatreId=1170&VenueTypeId=1&MovieId=6234&Date=0
+
+Reading that column and mentally prepending the domain silently drops the
+/tickets/ directory. This is a common trap, not a careless mistake.
+
+HOW TO GET THE REAL URL NEXT TIME:
+  - Click the request -> Headers tab -> General -> "Request URL"  (full URL)
+  - Or right-click the request -> Copy -> Copy link address
+  - Or enable the "Path" column (right-click the column headers)
+
+
+4. WHY THE FOUR ATTEMPTED FIXES COULD NEVER HAVE WORKED
+--------------------------------------------------------------------------------
+This is the part worth remembering.
+
+A 404 is decided by ROUTING, which happens BEFORE the server ever looks at
+cookies, headers, authentication, or bot detection. The server never got far
+enough to care about any of the things being changed.
+
+  Attempt 1 - requests.Session() for cookies    -> irrelevant to routing
+  Attempt 2 - manual f-string (literal slashes) -> irrelevant to routing
+  Attempt 3 - X-Requested-With / Referer / UA   -> irrelevant to routing
+  Attempt 4 - cloudscraper (Cloudflare bypass)  -> irrelevant to routing
+
+All four instincts were reasonable. They were just aimed at the wrong layer.
+
+PROOF: a bare requests.Session() with NO User-Agent, NO Referer, NO
+X-Requested-With, NO cookies and NO cloudscraper gets a clean 200 from all
+four URLs:
+
+    200   527227b  text/html          movies page
+    200     9209b  application/json   MoviesByTheaterAndVenueType
+    200       89b  application/json   GetDatesByTheaterMovieVenueType
+    200      486b  application/json   Events
+    cookies collected across all of that: {}
+
+So: Cloudflare was never blocking anything, the site genuinely sets zero
+cookies, and none of these endpoints inspect request headers at all.
+
+
+5. THE TRANSFERABLE LESSON: LET THE STATUS CODE TELL YOU THE LAYER
+--------------------------------------------------------------------------------
+  STATUS                    MEANING                     WHERE TO LOOK
+  ------------------------  --------------------------  ------------------------
+  404                       Route does not exist        THE URL PATH.
+                                                        Headers/cookies are
+                                                        irrelevant.
+  403 / 503 + challenge     Bot detection               UA, TLS fingerprint,
+                                                        cloudscraper
+  401                       Not authenticated           Cookies, tokens
+  400                       Route found, params bad     Parameter names/values
+  200 + wrong data          Route found, params         Parameter SPELLING
+                            silently ignored
+
+One thing that hid the real cause: this site's 404 returns a 106 KB styled
+HTML page, not a terse error. That makes it look like "something weird
+happened" rather than "this route does not exist."
+
+FAST TELL: check Content-Type early. A "text/html" response from an endpoint
+that should return JSON means you are not talking to the endpoint you think
+you are.
+
+
+6. THE Date=0 THEORY - TESTED, AND IT WAS A RED HERRING
+--------------------------------------------------------------------------------
+Both date forms work fine on the correct path. On the wrong path, both 404.
+Date was never the issue.
+
+But the hunch that Date=0 was meaningful was half right - it is just not a
+relative offset:
+
+    Date=0            -> 2 dates: 25/08, 26/08     (no filter)
+    Date=''           -> 2 dates                    (no filter)
+    Date=2026-08-25   -> 2 dates                    (no filter)
+    Date=25/08/2026   -> 1 date:  25/08             (filtered)
+    Date=27/08/2026   -> 0 dates                    (filtered, nothing showing)
+
+Date=0 does NOT mean "today". Anything the server cannot parse as dd/MM/yyyy
+falls back to NO DATE FILTER AT ALL. 0, 1, an empty string and an ISO date all
+behave identically. So Date=0 effectively means "everything upcoming".
+
+ALSO: params= is fine. Date=25%2F08%2F2026 and Date=25/08/2026 return
+byte-identical responses. The manual f-string workaround was never needed, and
+params= is the safer default because it escapes values properly.
+
+
+7. SECOND BUG FOUND: TheatreId USES A DIFFERENT ID SPACE
+--------------------------------------------------------------------------------
+Even on the correct path, TheatreId=1 returns [] while TheatreId=1170 returns
+data.
+
+  - /tickets/Events                    speaks the TICKETING SYSTEM's IDs
+  - MoviesByTheaterAndVenueType and
+    GetDatesByTheaterMovieVenueType    speak the SITE's IDs
+
+Both IDs sit side by side in the theatersAll blob already being parsed, as
+"ID" and "TixTheatreId":
+
+       ID  TixTheatreId   Name
+        1          1170   Cinema City Galilot
+        2          1173   Cinema City Rishon LeZion
+        3          1174   Cinema City Jerusalem
+        4          1175   Cinema City Kfar Saba
+        5          1176   Cinema City Netanya
+       13          1350   Cinema City Hadera
+       17          1178   Cinema City Beer Sheva
+       25          1181   Cinema City Ashdod
+
+Verified: every TheaterId appearing in Events responses is a TixTheatreId,
+with none left over.
+
+NOTE: TixTheatreId is NOT unique. Galilot is 1170 across its regular / VIP /
+ONYX / Lounge variants - which is exactly why VenueTypeId is required
+alongside it to disambiguate.
+
+Handled in the script by build_theater_id_map().
+
+
+8. THIRD BUG FOUND: MISSPELLED PARAMS FAIL SILENTLY WITH A 200
+--------------------------------------------------------------------------------
+This endpoint spells it TheatreId (British "re"), while the other two spell it
+theaterId (American "er"). Get it wrong and there is NO error - the filter is
+just dropped:
+
+    TheatreId=1170  -> 1 group,  theaters=[1170]                       CORRECT
+    TheaterId=1170  -> 1 group,  theaters=[1170,1173,1174,1175,...]    WRONG (all 8)
+    Movie_Id=6234   -> 42 groups                                       WRONG (all movies)
+
+That is ASP.NET MVC model binding: case-INSENSITIVE on names it recognizes
+(theatreid works fine), but UNKNOWN names are discarded rather than rejected.
+A missing parameter means "no filter", not an error.
+
+Worth watching for in the DB-loading code - this class of bug produces
+plausible-looking wrong data instead of a crash.
+
+
+9. OTHER THINGS RULED OUT ALONG THE WAY
+--------------------------------------------------------------------------------
+  - Path is case-INSENSITIVE: /TICKETS/EVENTS works the same as /tickets/Events
+  - Trailing slash makes no difference: /tickets/Events/ works
+  - No encoding problem: the server sends \uXXXX-escaped JSON, so r.json()
+    decodes Hebrew correctly. Hebrew showing as ??? in a terminal is the
+    Windows console codepage, not a data problem.
+  - No parameters at all is legal: /tickets/Events with no query string
+    returns all 50 movie-groups across every theater (193 KB).
+
+
+10. WHAT CHANGED IN scrape_cinema_city.py
+--------------------------------------------------------------------------------
+  - Fixed the path to /tickets/Events                       <-- THE ACTUAL FIX
+  - Switched back to params= and dropped the extra headers
+  - Replaced cloudscraper with a plain requests.Session()   (verified unnecessary)
+  - Added build_theater_id_map() for the ID -> TixTheatreId translation
+  - Added a BASE constant
+  - Removed the cookie-printing debug line and the stale "picks up cookies"
+    comment in fetch_movies_page(), since the site sets none
+
+Pre-fix original preserved at: scrape_cinema_city.py.bak
+
+Verified working end to end:
+
+    Found 17 theaters
+    Found 46 movies
+    Theater 1 shows 42 movies
+    Testing: Ice Cream Man (ID 6234)
+    Cleaned date: 25/08/2026 (site theater 1 -> TixTheatreId 1170)
+      20:20  25/08/2026 20:20  EventId=849691
+      22:30  25/08/2026 22:30  EventId=849692
+
+
+11. PERFORMANCE NOTE FOR SCALING UP
+--------------------------------------------------------------------------------
+/tickets/Events with NO parameters returns all 50 movie-groups across every
+theater in a single 193 KB response. Depending on how the data is stored, one
+bulk call plus local grouping may be much cheaper than looping
+theater x movie x date.
+
+================================================================================

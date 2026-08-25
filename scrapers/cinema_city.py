@@ -23,7 +23,10 @@ from scrape_cinema_city import (
     extract_theaters,
     extract_movies,
 )
-from .base import CinemaScraper, Theater, MovieListing, Showtime, clean_address
+from .base import (
+    CinemaScraper, Theater, MovieListing, Showtime,
+    clean_address, language_from_title,
+)
 
 # One row per physical building. theatersAll also contains VIP/ONYX/Prime/Lounge
 # sub-variants of the same buildings, which would duplicate theaters.
@@ -115,6 +118,11 @@ class CinemaCityScraper(CinemaScraper):
             if not movie_id:
                 continue  # showing somewhere we don't track as a physical theater
 
+            # No per-screening language field exists here: Cinema City ships the
+            # dubbed and subtitled cuts as separate movie ids whose titles carry
+            # "-מדובב" / "-אנגלית", so the title is the only signal.
+            dubbed, original = language_from_title(group["Name"])
+
             for slot in group.get("Dates", []):
                 try:
                     starts_at = datetime.strptime(slot["Date"], "%d/%m/%Y %H:%M")
@@ -129,6 +137,8 @@ class CinemaCityScraper(CinemaScraper):
                         source_movie_id=movie_id,
                         starts_at=starts_at.isoformat(),
                         ticket_url=TICKET_URL.format(event_id=slot["EventId"]),
+                        dubbed_language=dubbed,
+                        original_language=original,
                     )
                 )
         return showtimes

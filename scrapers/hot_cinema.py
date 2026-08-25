@@ -21,7 +21,10 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
-from .base import CinemaScraper, Theater, MovieListing, Showtime
+from .base import (
+    CinemaScraper, Theater, MovieListing, Showtime,
+    language_from_title, normalize_language,
+)
 
 BASE = "https://hotcinema.co.il"
 TICKET_URL = BASE + "/order?theaterId={theater_id}&eventId={event_id}"
@@ -150,6 +153,18 @@ class HotCinemaScraper(CinemaScraper):
                     if theater_id is None or not event_id:
                         continue
 
+                    # Slot-level fields when present, otherwise the group's,
+                    # otherwise the title -- coverage varies by film.
+                    dubbed = normalize_language(
+                        slot.get("DubbedLanguage") or group.get("DubbedLanguage")
+                    )
+                    subtitles = normalize_language(
+                        slot.get("SubtitledLanguage") or group.get("SubtitledLanguage")
+                    )
+                    original = None
+                    if not dubbed:
+                        dubbed, original = language_from_title(movie["Name"])
+
                     showtimes.append(
                         Showtime(
                             source_theatre_id=str(theater_id),
@@ -159,6 +174,9 @@ class HotCinemaScraper(CinemaScraper):
                                 theater_id=theater_id, event_id=event_id
                             ),
                             venue_type="VIP" if slot.get("IsVIP") else "regular",
+                            dubbed_language=dubbed,
+                            original_language=original,
+                            subtitled_language=subtitles,
                         )
                     )
         return showtimes

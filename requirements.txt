@@ -1,0 +1,16 @@
+# Backend dependencies. Pinned to what this project was developed and tested
+# against, so a deploy can't silently pull a breaking release.
+#
+# Note there is no cloudscraper here on purpose: it was added early on to chase
+# a 404 that turned out to be a wrong URL path, and nothing imports it now.
+# Four of the five chains answer a bare request with no headers at all; only Lev
+# checks the User-Agent, which base.py sets.
+
+fastapi==0.141.1
+uvicorn==0.52.4
+SQLAlchemy==2.0.52
+requests==2.34.2
+beautifulsoup4==4.15.0
+python-dotenv==1.2.3
+RapidFuzz==3.14.5
+pydantic==2.13.4

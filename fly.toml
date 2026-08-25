@@ -1,0 +1,57 @@
+# Fly.io configuration.
+#
+# Two settings here are load-bearing for this app specifically:
+#
+#   auto_stop_machines = false
+#     The scraper runs inside the web process on a timer. If Fly suspends the
+#     machine when no one is browsing, scraping stops and showtimes go stale --
+#     which is the whole point of the service. This keeps it awake.
+#
+#   [mounts]
+#     SQLite must live on a volume. Without it the database is part of the
+#     container filesystem and resets to empty on every deploy.
+
+app = "on-cinema-now"
+primary_region = "cdg"   # Paris — closest Fly region to Israel for latency
+
+[build]
+
+[env]
+  API_HOST = "0.0.0.0"
+  API_PORT = "8080"
+  DATABASE_URL = "sqlite:////data/movie_aggregator.db"
+  SCRAPE_DAYS = "7"
+
+[http_service]
+  internal_port = 8080
+  force_https = true          # geolocation is blocked on plain http
+  auto_stop_machines = false  # see note above: the scraper must keep running
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 40
+    hard_limit = 80
+
+[mounts]
+  source = "oncinema_data"
+  destination = "/data"
+
+[[vm]]
+  # 512MB rather than the 256MB default: the API loads the full screening set
+  # into memory to build each response, and Lev's scrape holds a lot of parsed
+  # HTML. 256MB risks the OOM killer mid-scrape.
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 8080
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"

@@ -44,3 +44,22 @@
   background: var(--accent);
   color: var(--accent-ink);
 }
+
+/* Flag reads as the language of the audio. Kept small so the time stays the
+   dominant element -- the flag is a qualifier, not the headline. */
+.showtime-pill__flag {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Spelled out as well as flagged: a flag alone is ambiguous for a film whose
+   original language is also Hebrew. */
+.showtime-pill__dub {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-dim);
+}

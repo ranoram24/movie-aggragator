@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
@@ -5,7 +7,13 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 # "sqlite:///./movie_aggregator.db" means: create a SQLite file called
 # movie_aggregator.db right here in the project folder.
 # That file will appear automatically the first time we actually use it.
-DATABASE_URL = "sqlite:///./movie_aggregator.db"
+#
+# In production this is overridden by the DATABASE_URL environment variable so
+# the file can live on a mounted volume instead of inside the container. A
+# container's own filesystem is thrown away on every restart and redeploy, so
+# a database written there would silently reset to empty.
+# Note the four slashes for an absolute path: sqlite:////data/movie_aggregator.db
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./movie_aggregator.db")
 
 # The engine is SQLAlchemy's core connection object — the thing that
 # actually talks to the database.

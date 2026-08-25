@@ -30,6 +30,18 @@ export interface Showtime {
   venue_type: string;
   /** Deep link to this exact screening's checkout. Never null. */
   ticket_url: string;
+
+  /** ISO-639-1. null when the film plays in its original audio. */
+  dubbed_language: string | null;
+  original_language: string | null;
+  subtitled_language: string | null;
+  /** What the audience hears: the dub if there is one, else the original. */
+  spoken_language: string | null;
+}
+
+export interface Chain {
+  key: string;
+  name: string;
 }
 
 export interface DateGroup {

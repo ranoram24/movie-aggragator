@@ -31,7 +31,10 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
-from .base import CinemaScraper, Theater, MovieListing, Showtime
+from .base import (
+    CinemaScraper, Theater, MovieListing, Showtime,
+    language_from_title, normalize_language,
+)
 
 BASE = "https://www.lev.co.il"
 AJAX = f"{BASE}/wp-content/themes/lev/ajax_data.php"
@@ -170,6 +173,14 @@ class LevScraper(CinemaScraper):
                 if not types:
                     continue
                 fmt = types[0]
+                # The format option's own label spells out the language, e.g.
+                # "שפת מקור (צרפתית) עם כתוביות (עברית + אנגלית)".
+                label = fmt.get("text", "")
+                dubbed, original = language_from_title(label)
+                if not dubbed and not original:
+                    dubbed, original = language_from_title(movie["text"])
+                subtitles = "he" if "כתוביות" in label else None
+
                 ctx = {
                     "siteid": site,
                     "lcode": fmt.get("data-lcode", ""),
@@ -212,6 +223,9 @@ class LevScraper(CinemaScraper):
                                 # return disjoint pcode sets, so it never
                                 # matches. The site name works and resolves 200.
                                 ticket_url=TICKET_URL.format(pcode=pcode, loc=site),
+                                dubbed_language=dubbed,
+                                original_language=original,
+                                subtitled_language=subtitles,
                             )
                         )
         return showtimes

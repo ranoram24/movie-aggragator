@@ -1,0 +1,39 @@
+.chainfilter {
+  position: relative;
+  margin-bottom: 14px;
+}
+
+.chainfilter__scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 16px 4px;
+  scrollbar-width: none;
+  /* Snap so a chip never ends up half-cut at the edge. */
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chainfilter__scroll::-webkit-scrollbar { display: none; }
+
+.chainfilter__chip {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  min-height: 38px;
+  padding: 0 15px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.chainfilter__chip--on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}

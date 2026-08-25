@@ -6,11 +6,13 @@
  * one file means a change to the API shape has exactly one place to touch.
  */
 
-import type { Coords, MovieDetail, MovieSummary } from './types';
+import type { Chain, Coords, MovieDetail, MovieSummary } from './types';
 
-// Set in .env as VITE_API_BASE_URL. Falls back to the backend's default port
-// (8010, not 8000 -- that one is reserved) so a missing .env still runs.
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8010';
+// In development .env points this at the separate backend on 8010 (not 8000 --
+// that port is reserved). In production the API is served from the same origin
+// as this page, so an empty value means "talk to wherever I'm hosted" and the
+// deployed URL never has to be baked into the bundle.
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || window.location.origin;
 
 export class ApiError extends Error {
   // Declared as a normal field rather than a constructor parameter property:
@@ -57,19 +59,35 @@ async function getJson<T>(path: string, params?: Record<string, string | number 
   return (await response.json()) as T;
 }
 
-/** Films currently playing. Pass coords to sort by distance. */
-export function fetchMovies(coords: Coords | null, limit = 100): Promise<MovieSummary[]> {
+/** Films currently playing. Pass coords to sort by distance, chains to filter. */
+export function fetchMovies(
+  coords: Coords | null,
+  chains: string[] = [],
+  limit = 100,
+): Promise<MovieSummary[]> {
   return getJson<MovieSummary[]>('/api/movies', {
     lat: coords?.lat,
     lon: coords?.lon,
+    // Empty means "all chains" — send nothing rather than an empty string.
+    chains: chains.length ? chains.join(',') : undefined,
     limit,
   });
 }
 
 /** One film, with every theatre showing it. */
-export function fetchMovie(id: string, coords: Coords | null): Promise<MovieDetail> {
+export function fetchMovie(
+  id: string,
+  coords: Coords | null,
+  chains: string[] = [],
+): Promise<MovieDetail> {
   return getJson<MovieDetail>(`/api/movies/${encodeURIComponent(id)}`, {
     lat: coords?.lat,
     lon: coords?.lon,
+    chains: chains.length ? chains.join(',') : undefined,
   });
+}
+
+/** Chains available to filter by. */
+export function fetchChains(): Promise<Chain[]> {
+  return getJson<Chain[]>('/api/chains');
 }

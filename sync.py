@@ -81,17 +81,20 @@ def upsert_listing(db, cinema_source_id: int, movie) -> SourceMovieListing:
 def upsert_screening(db, listing_id: int, theatre_id: int, showtime) -> bool:
     """Returns True if this was a new screening.
 
-    venue_type is part of the identity, not just an attribute. A cinema can run
-    the same film at the same minute in IMAX and in a regular hall -- those are
-    two separately bookable events with different ticket URLs, so keying on
+    venue_type AND the dub language are part of the identity, not just
+    attributes. A cinema can run the same film at the same minute in IMAX and in
+    a regular hall, and can run a Hebrew-dubbed and an original-audio showing at
+    the same time -- Planet serves both under a single film id. Each is a
+    separately bookable event with its own ticket URL, so keying on
     (listing, theatre, time) alone would collapse them and send someone to the
-    wrong format's checkout.
+    wrong showing's checkout.
     """
     row = db.query(Screening).filter_by(
         source_movie_listing_id=listing_id,
         theatre_id=theatre_id,
         showtime=showtime.starts_at,
         venue_type=showtime.venue_type,
+        dubbed_language=showtime.dubbed_language,
     ).first()
     is_new = row is None
     if is_new:
@@ -100,9 +103,12 @@ def upsert_screening(db, listing_id: int, theatre_id: int, showtime) -> bool:
             theatre_id=theatre_id,
             showtime=showtime.starts_at,
             venue_type=showtime.venue_type,
+            dubbed_language=showtime.dubbed_language,
         )
         db.add(row)
 
+    row.original_language = showtime.original_language
+    row.subtitled_language = showtime.subtitled_language
     row.ticket_url = showtime.ticket_url
     row.last_verified_at = datetime.now().isoformat()
     return is_new
@@ -127,7 +133,7 @@ def sync_chain(db, key: str, days: int) -> dict:
     # existence query in upsert_screening until the next commit. If a scraper
     # emits the same showing twice in one run, both rows would be written.
     # Tracking the keys here is cheaper than flushing on every row.
-    seen: set[tuple[int, int, str, str]] = set()
+    seen: set[tuple[int, int, str, str, str | None]] = set()
 
     for showtime in scraper.get_showtimes(days=days):
         theatre = theatres.get(showtime.source_theatre_id)
@@ -139,7 +145,8 @@ def sync_chain(db, key: str, days: int) -> dict:
             skipped_unknown += 1
             continue
 
-        key = (listing.id, theatre.id, showtime.starts_at, showtime.venue_type)
+        key = (listing.id, theatre.id, showtime.starts_at,
+               showtime.venue_type, showtime.dubbed_language)
         if key in seen:
             duplicates += 1
             continue

@@ -18,7 +18,10 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
-from .base import CinemaScraper, Theater, MovieListing, Showtime
+from .base import (
+    CinemaScraper, Theater, MovieListing, Showtime,
+    language_from_title, normalize_language,
+)
 
 BASE = "https://movieland.co.il"
 
@@ -142,6 +145,15 @@ class MovielandScraper(CinemaScraper):
                 if not (today <= starts_at.date() < cutoff):
                     continue
 
+                # Dubbed is a plain boolean; SiteGroup is prose like
+                # "מדובב לעברית, כתוביות בעברית" and carries the actual language.
+                site_group = slot.get("SiteGroup") or ""
+                if slot.get("Dubbed"):
+                    dubbed = normalize_language(site_group) or "he"
+                    original = None
+                else:
+                    dubbed, original = language_from_title(movie["Name"])
+
                 showtimes.append(
                     Showtime(
                         source_theatre_id=str(slot["TheaterId"]),
@@ -149,6 +161,9 @@ class MovielandScraper(CinemaScraper):
                         starts_at=starts_at.isoformat(),
                         ticket_url=ticket_url,
                         venue_type="VIP" if slot.get("IsVip") else "regular",
+                        dubbed_language=dubbed,
+                        original_language=original,
+                        subtitled_language="he" if "כתוביות" in site_group else None,
                     )
                 )
         return showtimes

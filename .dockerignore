@@ -1,0 +1,24 @@
+# Keep the build context small and never ship secrets or local state.
+.git
+.gitignore
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Secrets: the TMDb token is supplied as a platform secret, never baked in.
+.env
+frontend/.env
+
+# Local database — production uses the mounted volume.
+*.db
+*.db-journal
+
+# Built artefacts and dependencies are produced inside the image.
+frontend/node_modules/
+frontend/dist/
+
+# Local scratch
+*.bak
+cinema_city_movies.html
+FIX_NOTES_events_404.txt

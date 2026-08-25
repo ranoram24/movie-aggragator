@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useChainSelection } from '../hooks/useChainSelection';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useMovie } from '../hooks/useMovie';
 import { TheaterList } from '../components/TheaterList';
@@ -17,7 +18,10 @@ import './MovieDetailScreen.css';
 export function MovieDetailScreen() {
   const { id } = useParams<{ id: string }>();
   const { coords } = useGeolocation();
-  const { movie, loading, error, reload } = useMovie(id, coords);
+  // Carry the browse filter through, so the theatre list matches what the
+  // user narrowed to rather than silently widening again.
+  const { selected } = useChainSelection();
+  const { movie, loading, error, reload } = useMovie(id, coords, selected);
   const [scrolled, setScrolled] = useState(false);
 
   // Reveal the title in the sticky bar once the big one scrolls away.

@@ -57,5 +57,15 @@ class Screening(Base):
     theatre_id = Column(Integer, ForeignKey("theatres.id"))
     showtime = Column(String)  # simple string for now, refine later
     venue_type = Column(String, nullable=True)  # e.g. "regular", "VIP"
+
+    # Language of the audio and of the subtitles, as ISO-639-1 codes ("he", "en").
+    # These belong on the screening rather than the listing because a cinema can
+    # run the dubbed and the original version of one film at the same venue on
+    # the same day -- Planet serves both under a single film id. Two separately
+    # bookable showings, so they must not collapse into one row.
+    dubbed_language = Column(String, nullable=True)      # None = not dubbed
+    original_language = Column(String, nullable=True)    # the spoken language when not dubbed
+    subtitled_language = Column(String, nullable=True)
+
     ticket_url = Column(String, nullable=True)  # deep link straight to this showtime's checkout
     last_verified_at = Column(String, nullable=True)

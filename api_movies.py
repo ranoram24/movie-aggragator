@@ -37,6 +37,11 @@ EARTH_RADIUS_KM = 6371.0
 
 # ---------------------------------------------------------------- response models
 
+class ChainOut(BaseModel):
+    key: str
+    name: str
+
+
 class MovieSummary(BaseModel):
     id: str                              # "m{movie_id}" or "l{listing_id}"
     title_he: str
@@ -51,6 +56,13 @@ class ShowtimeOut(BaseModel):
     time: str                            # "20:20"
     venue_type: str
     ticket_url: str
+    # ISO-639-1. dubbed_language is None when the film plays in its original
+    # audio; spoken_language is whichever the audience actually hears, so the
+    # client can render one flag without re-deriving the rule.
+    dubbed_language: str | None = None
+    original_language: str | None = None
+    subtitled_language: str | None = None
+    spoken_language: str | None = None
 
 
 class DateGroup(BaseModel):
@@ -136,6 +148,13 @@ def _rows(db: Session):
     )
 
 
+def _chain_filter(chains: Optional[str]) -> set[str]:
+    """Parse the ?chains= query into a set of keys. Empty set means 'all'."""
+    if not chains:
+        return set()
+    return {c.strip() for c in chains.split(",") if c.strip()}
+
+
 def _distance(theatre: Theatre, lat: Optional[float], lon: Optional[float]):
     if lat is None or lon is None or theatre.latitude is None or theatre.longitude is None:
         return None
@@ -149,6 +168,10 @@ def list_movies(
     lat: Optional[float] = Query(None, ge=-90, le=90),
     lon: Optional[float] = Query(None, ge=-180, le=180),
     limit: int = Query(100, ge=1, le=300),
+    chains: Optional[str] = Query(
+        None,
+        description="Comma-separated chain keys, e.g. 'planet,lev'. Omit for all.",
+    ),
 ):
     """Films currently playing, nearest first when coordinates are supplied.
 
@@ -156,11 +179,18 @@ def list_movies(
     denied -- falls back to "showing at the most theatres", which is a decent
     proxy for prominence, then title.
     """
+    wanted = _chain_filter(chains)
+
     db = SessionLocal()
     try:
         films: dict[str, dict] = {}
 
         for screening, listing, theatre, source, movie in _rows(db):
+            # Filtering here rather than in SQL keeps theatre_count and
+            # nearest_km honest: they must describe only the chains the user
+            # asked for, not the full set.
+            if wanted and source.key not in wanted:
+                continue
             key = film_key(listing)
             film = films.get(key)
             if film is None:
@@ -212,11 +242,16 @@ def movie_detail(
     film_id: str,
     lat: Optional[float] = Query(None, ge=-90, le=90),
     lon: Optional[float] = Query(None, ge=-180, le=180),
+    chains: Optional[str] = Query(None, description="Comma-separated chain keys."),
 ):
     """One film: metadata plus every theatre showing it, nearest first."""
     db = SessionLocal()
     try:
-        matching = [r for r in _rows(db) if film_key(r[1]) == film_id]
+        wanted = _chain_filter(chains)
+        matching = [
+            r for r in _rows(db)
+            if film_key(r[1]) == film_id and (not wanted or r[3].key in wanted)
+        ]
         if not matching:
             raise HTTPException(404, f"No current screenings for film '{film_id}'")
 
@@ -256,6 +291,11 @@ def movie_detail(
                     time=starts_at.strftime("%H:%M"),
                     venue_type=screening.venue_type or "regular",
                     ticket_url=screening.ticket_url,
+                    dubbed_language=screening.dubbed_language,
+                    original_language=screening.original_language,
+                    subtitled_language=screening.subtitled_language,
+                    spoken_language=(screening.dubbed_language
+                                     or screening.original_language),
                 )
             )
 
@@ -279,5 +319,19 @@ def movie_detail(
                                      t.name))
 
         return MovieDetail(id=film_id, theatres=theatres, **meta)
+    finally:
+        db.close()
+
+
+@router.get("/chains", response_model=list[ChainOut])
+def list_chains():
+    """The cinema chains available to filter by, for the browse screen's chips."""
+    db = SessionLocal()
+    try:
+        return [
+            ChainOut(key=source.key, name=source.name or source.key)
+            for source in db.query(CinemaSource).order_by(CinemaSource.id)
+            if source.key
+        ]
     finally:
         db.close()

@@ -50,6 +50,11 @@ def _split_attributes(attribute_ids: list[str]) -> tuple[str | None, str | None,
     )
 
 
+def _first(values) -> str | None:
+    """First entry of one of Planet's language arrays, or None if empty."""
+    return values[0] if values else None
+
+
 class PlanetScraper(CinemaScraper):
     source_key = "planet"
     source_name = "Planet"
@@ -151,6 +156,15 @@ class PlanetScraper(CinemaScraper):
                         continue
 
                     _, _, venue_type = _split_attributes(event.get("attributeIds"))
+
+                    # The richest language data of any chain, and crucially
+                    # per-EVENT: Planet serves the dubbed and original cuts of a
+                    # film under one filmId, distinguished only here.
+                    languages = event.get("languages") or {}
+                    dubbed = _first(languages.get("dubbed"))
+                    original = _first(languages.get("original"))
+                    subtitles = _first(languages.get("subtitles"))
+
                     showtimes.append(
                         Showtime(
                             source_theatre_id=cinema_id,
@@ -158,6 +172,9 @@ class PlanetScraper(CinemaScraper):
                             starts_at=starts_at.isoformat(),
                             ticket_url=ticket_url,
                             venue_type=venue_type,
+                            dubbed_language=dubbed,
+                            original_language=None if dubbed else original,
+                            subtitled_language=subtitles,
                         )
                     )
         return showtimes

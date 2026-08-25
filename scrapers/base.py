@@ -66,6 +66,67 @@ class Showtime:
     ticket_url: str                 # REQUIRED: deep link to THIS showtime's checkout
     venue_type: str = "regular"     # "regular", "VIP", "IMAX", ...
 
+    # ISO-639-1 codes. dubbed_language is None when the film plays in its
+    # original audio. Every chain exposes this somewhere, but no two agree
+    # where -- see each scraper for the specifics.
+    dubbed_language: Optional[str] = None
+    original_language: Optional[str] = None
+    subtitled_language: Optional[str] = None
+
+    @property
+    def spoken_language(self) -> Optional[str]:
+        """What the audience actually hears -- the dub if there is one."""
+        return self.dubbed_language or self.original_language
+
+
+# Chains name languages in Hebrew prose, in English, or as ISO codes depending
+# on the endpoint. Normalising to ISO-639-1 keeps the UI's flag lookup simple.
+_LANGUAGE_CODES = {
+    "עברית": "he", "עברי": "he", "מדובב לעברית": "he", "hebrew": "he", "he": "he",
+    "אנגלית": "en", "אנגלי": "en", "english": "en", "en": "en",
+    "צרפתית": "fr", "french": "fr", "fr": "fr",
+    "רוסית": "ru", "russian": "ru", "ru": "ru",
+    "ספרדית": "es", "spanish": "es", "es": "es",
+    "ערבית": "ar", "arabic": "ar", "ar": "ar",
+    "איטלקית": "it", "it": "it",
+    "גרמנית": "de", "de": "de",
+}
+
+
+def normalize_language(value: Optional[str]) -> Optional[str]:
+    """Map whatever a chain calls a language onto an ISO-639-1 code."""
+    if not value:
+        return None
+    key = " ".join(str(value).split()).strip().lower()
+    if key in _LANGUAGE_CODES:
+        return _LANGUAGE_CODES[key]
+    # Fall back to a substring hit: values arrive as prose like
+    # "מדובב לעברית + כתוביות בעברית".
+    for name, code in _LANGUAGE_CODES.items():
+        if name in key:
+            return code
+    return None
+
+
+def language_from_title(title: str) -> tuple[Optional[str], Optional[str]]:
+    """(dubbed_language, original_language) inferred from a listing's title.
+
+    Cinema City has no per-screening language field at all -- it publishes the
+    dubbed and subtitled versions as two different movie ids, distinguished
+    only by a title suffix ("...-מדובב" vs "...-אנגלית"). This reads that back.
+    """
+    if not title:
+        return None, None
+
+    dub = re.search(r"מדובב(?:ת)?(?:\s+ל(\S+))?", title)
+    if dub:
+        # "מדובב לצרפתית" names its target; a bare "מדובב" means Hebrew.
+        return (normalize_language(dub.group(1)) or "he"), None
+
+    if re.search(r"\bאנגלית\b", title):
+        return None, "en"
+    return None, None
+
 
 class CinemaScraper(ABC):
     """Base class for a single cinema chain."""

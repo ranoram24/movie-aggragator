@@ -6,8 +6,11 @@
  * dialog, and must look identical-but-unsorted if permission is refused.
  */
 
+import { useChains } from '../hooks/useChains';
+import { useChainSelection } from '../hooks/useChainSelection';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useMovies } from '../hooks/useMovies';
+import { ChainFilter } from '../components/ChainFilter';
 import { MovieGrid } from '../components/MovieGrid';
 import { MovieGridSkeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/ErrorState';
@@ -15,12 +18,12 @@ import './BrowseScreen.css';
 
 export function BrowseScreen() {
   const { coords, status, retry } = useGeolocation();
-  const { movies, loading, error, reload } = useMovies(coords);
+  const chains = useChains();
+  const { selected, toggle, clear } = useChainSelection();
+  const { movies, loading, error, reload } = useMovies(coords, selected);
 
   const sortLabel =
-    status === 'granted' && coords
-      ? 'לפי קרבה אליך'
-      : 'לפי מספר בתי הקולנוע';
+    status === 'granted' && coords ? 'לפי קרבה אליך' : 'לפי מספר בתי הקולנוע';
 
   return (
     <div className="browse">
@@ -32,6 +35,13 @@ export function BrowseScreen() {
           <span className="browse__sort">{sortLabel}</span>
         </p>
       </header>
+
+      <ChainFilter
+        chains={chains}
+        selected={selected}
+        onToggle={toggle}
+        onClear={clear}
+      />
 
       {/* Only nudge when location would actually change the ordering, and never
           block the content behind it. */}
@@ -51,7 +61,13 @@ export function BrowseScreen() {
       {!loading && error && <ErrorState message={error} onRetry={reload} />}
 
       {!loading && !error && movies.length === 0 && (
-        <EmptyState message="אין הקרנות זמינות כרגע." />
+        <EmptyState
+          message={
+            selected.length
+              ? 'אין הקרנות ברשתות שנבחרו.'
+              : 'אין הקרנות זמינות כרגע.'
+          }
+        />
       )}
 
       {!loading && !error && movies.length > 0 && <MovieGrid movies={movies} />}

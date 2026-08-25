@@ -221,3 +221,117 @@ bulk call plus local grouping may be much cheaper than looping
 theater x movie x date.
 
 ================================================================================
+
+================================================================================
+ADDENDUM - MULTI-CHAIN SCRAPERS (2026-08-25)
+================================================================================
+
+Four more chains were added behind a shared interface (scrapers/base.py).
+Quirks found in each, in the same spirit as the notes above.
+
+
+MOVIELAND
+  /api/Events takes NO parameters and returns everything -- 51 movies, all
+  theaters, all dates, ~280KB, one call. All filtering on the site is
+  client-side. BookingNativeUrl on each date is the per-showtime deep link.
+  Gotcha: MovieRating is a nested object {"ID":13,"Name":"..."} , not a string.
+  Binding it straight into SQLite raises "type 'dict' is not supported".
+
+
+PLANET
+  Standard "quickbook" API: /il/data-api-service/v1/quickbook/10100/...
+  Richest of the five -- the cinemas endpoint returns structured addresses AND
+  latitude/longitude.
+
+  THE BIG ONE: the obvious booking field, `bookingLink`, IS DEAD. It 404s, as do
+  compositeBookingLink.bookingUrl and obsoleteBookingUrl -- all three point at a
+  retired tickets5.planetcinema.co.il host. Only `bookingRouterLaunchLink`
+  resolves. Exact same shape as the original /Events bug: a plausible-looking
+  URL that 404s because the path is wrong. Always TEST a link field; never
+  trust it because the name sounds right.
+
+  attributeIds is one flat list mixing three concepts: age rating ("14-plus"),
+  genre ("horror"), venue type ("imax"), plus language plumbing to ignore.
+
+
+HOT CINEMA
+  Movie-first API, the inverse of everyone else: there is no "showtimes at
+  theater X" endpoint. /tickets/movieevents?movieid=N returns every theater for
+  one movie, so theaters have to be derived from the responses.
+  /order?theaterId=&eventId= is a redirector that rewrites theaterId=16 into an
+  internal site id (-> tickets.hotcinema.co.il/site/1197?code=1197-133196).
+  Store the short form and let the site resolve it.
+  Same British/American spelling hazard as Cinema City: its own JS uses
+  `theatreid` on one endpoint and `theaterId` on another.
+
+
+LEV
+  The only chain with no JSON. Everything comes from ajax_data.php, which
+  returns HTML fragments, tilde-delimited as "<html>~<count>~<next_passval>".
+  Showtimes require a 4-step cascade (get_movies -> get_types -> get_dates ->
+  get_times), threading data-* attributes between steps.
+
+  Two traps:
+   - `movie_on_location` honours `date` but SILENTLY IGNORES `loc`. Passing
+     loc=7 and loc=1150 return byte-identical responses. Same silent-parameter
+     failure as Cinema City's TheatreId/TheaterId.
+   - `movie_on_location_new` looks like the improved version. It is a dead end
+     that returns a one-line notice. Use `movie_on_location`.
+
+  LEV IS THE ONE CHAIN WITH REAL BOT DETECTION. It runs Wordfence and returns
+  403 for the default "python-requests/x.y" User-Agent. This is what genuine
+  bot blocking actually looks like -- a 403, NOT a 404. Note the subtle bug it
+  exposed: requests.Session() ALREADY has a User-Agent header, so
+  headers.setdefault("User-Agent", ...) is a silent no-op and leaves the
+  python-requests value in place. Use plain assignment.
+
+
+CROSS-CUTTING LESSON, RESTATED
+  Across all five chains the status code told us which layer failed:
+    404 -> wrong PATH            (Cinema City /Events, Planet bookingLink)
+    403 -> real bot detection    (Lev, fixed with a User-Agent)
+    200 -> route fine; if the data looks wrong, check parameter SPELLING
+           (Cinema City TheaterId, Lev loc)
+  Only ONE of the five needed a header of any kind. None needed cloudscraper.
+
+================================================================================
+
+--------------------------------------------------------------------------------
+TWO BUGS FOUND DURING VERIFICATION (worth remembering)
+--------------------------------------------------------------------------------
+
+1. DUPLICATE ROWS FROM autoflush=False
+   database.py creates sessions with autoflush=False. That means a pending
+   INSERT is INVISIBLE to a later query in the same transaction. The
+   "does this row already exist?" check inside the sync loop therefore could
+   not see rows added earlier in the same run, so anything a scraper emitted
+   twice got written twice.
+
+   Note the re-run test did NOT catch this: re-running produced "0 new" because
+   by then the rows WERE committed and visible. Only a GROUP BY ... HAVING
+   COUNT(*)>1 query exposed it. Idempotency across runs is not the same
+   property as uniqueness within a run -- test both.
+
+   Fix: track the keys already handled in an in-memory set during the run.
+
+   Why Planet emitted repeats at all: its date queries are by BUSINESS day, not
+   calendar day. A 00:30 screening belongs to the previous business day, so it
+   comes back under two different date queries.
+
+
+2. venue_type IS PART OF A SCREENING'S IDENTITY
+   A cinema can run the same film at the SAME MINUTE in IMAX and in a regular
+   hall. Those are two separately bookable events with different EventIds and
+   different ticket URLs. Keying a screening on (movie, theatre, time) alone
+   silently collapsed 55 of them -- and the survivor's ticket link pointed at
+   whichever format happened to be written first, so half of those links would
+   have sent a user to the wrong screening.
+
+   Fix: (movie, theatre, time, venue_type). Real spread once fixed:
+     regular 6742 | VIP 320 | 4DX 120 | SCREENX 114 | IMAX 103
+
+   The general lesson: before deduping, check whether the rows you are
+   collapsing are actually the same THING. "Same movie, same place, same time"
+   sounded like a safe key and was not.
+
+================================================================================

@@ -16,6 +16,7 @@ class CinemaSource(Base):
     __tablename__ = "cinema_sources"
 
     id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, index=True)  # stable slug, e.g. "cinema_city" -> maps to a scraper class
     name = Column(String)  # e.g. "Cinema City"
 
 class Theatre(Base):
@@ -24,6 +25,7 @@ class Theatre(Base):
     id = Column(Integer, primary_key=True, index=True)
     cinema_source_id = Column(Integer, ForeignKey("cinema_sources.id"))
     name = Column(String)
+    address = Column(String, nullable=True)
     latitude = Column(Float)
     longitude = Column(Float)
     source_theatre_id = Column(String)  # the ID this cinema chain uses internally (e.g. TheatreId=1173)
@@ -38,6 +40,15 @@ class SourceMovieListing(Base):
     raw_title = Column(String)  # the title as scraped, before matching
     match_confidence = Column(Float, nullable=True)
 
+    # Metadata as the chain itself reports it, kept separate from the TMDb-matched
+    # Movie record so we can still show something for listings TMDb can't match
+    # (opera broadcasts, concerts, live stage shows).
+    poster_url = Column(String, nullable=True)
+    genre = Column(String, nullable=True)
+    runtime_minutes = Column(Integer, nullable=True)
+    premiere_date = Column(String, nullable=True)
+    age_rating = Column(String, nullable=True)
+
 class Screening(Base):
     __tablename__ = "screenings"
 
@@ -46,5 +57,5 @@ class Screening(Base):
     theatre_id = Column(Integer, ForeignKey("theatres.id"))
     showtime = Column(String)  # simple string for now, refine later
     venue_type = Column(String, nullable=True)  # e.g. "regular", "VIP"
-    ticket_url = Column(String, nullable=True)
+    ticket_url = Column(String, nullable=True)  # deep link straight to this showtime's checkout
     last_verified_at = Column(String, nullable=True)

@@ -1,0 +1,46 @@
+.showtime-group { margin-top: 12px; }
+
+.showtime-group__label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-faint);
+}
+
+.showtime-group__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.showtime-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 44px min height: this is the primary tap target on the whole screen. */
+  min-height: var(--tap-min);
+  padding: 0 15px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.showtime-pill__time {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Non-standard formats (IMAX/4DX/VIP) are a real price and experience
+   difference, so they are always visible rather than hidden behind a filter. */
+.showtime-pill__format {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-ink);
+}

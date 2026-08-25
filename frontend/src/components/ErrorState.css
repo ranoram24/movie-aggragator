@@ -1,0 +1,26 @@
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 56px 28px;
+  text-align: center;
+}
+
+.error-icon { font-size: 34px; opacity: 0.75; }
+
+.error-message {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 15px;
+  max-width: 30ch;
+}
+
+.error-retry {
+  min-height: var(--tap-min);
+  padding: 0 26px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}

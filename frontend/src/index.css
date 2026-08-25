@@ -1,0 +1,119 @@
+/* ---------------------------------------------------------------------------
+   On Cinema — dark, poster-forward, built for a phone held in one hand.
+
+   Sizing rules that matter on a real device:
+   - Tap targets are never smaller than 44px.
+   - Body text never below 15px; nothing critical in the top corners.
+   - Safe-area insets are honoured so content clears the notch and home bar.
+   --------------------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;900&family=Bebas+Neue&display=swap');
+
+:root {
+  /* Near-black rather than pure black: posters read better against it and it
+     avoids OLED smearing when scrolling fast. */
+  --bg: #0b0b0f;
+  --bg-raised: #16161d;
+  --bg-elevated: #1e1e28;
+  --border: #2a2a36;
+
+  --text: #f4f4f6;
+  --text-dim: #a2a2b0;
+  --text-faint: #6e6e80;
+
+  --accent: #ffb703;        /* marquee amber — used sparingly, for showtimes */
+  --accent-ink: #1a1200;
+  --live: #4ade80;
+
+  --radius: 14px;
+  --radius-sm: 9px;
+  --tap-min: 44px;
+
+  --font-display: 'Bebas Neue', 'Heebo', system-ui, sans-serif;
+  --font-body: 'Heebo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.45;
+  /* Momentum scrolling + no horizontal drift on mobile. */
+  -webkit-overflow-scrolling: touch;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Respect a user who has asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---- shared primitives ---------------------------------------------------- */
+
+.app {
+  min-height: 100dvh;
+  padding-bottom: calc(24px + var(--safe-bottom));
+}
+
+.shimmer {
+  background: linear-gradient(
+    100deg,
+    var(--bg-raised) 30%,
+    var(--bg-elevated) 50%,
+    var(--bg-raised) 70%
+  );
+  background-size: 220% 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+@keyframes shimmer {
+  to { background-position: -220% 0; }
+}
+
+/* Pressed state instead of hover — hover doesn't exist on touch. */
+.pressable {
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+.pressable:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}

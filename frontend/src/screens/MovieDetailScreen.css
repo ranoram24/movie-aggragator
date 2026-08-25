@@ -1,0 +1,136 @@
+.detail { padding-bottom: 20px; }
+
+/* Sticky header keeps the back control in thumb reach on a long scroll. */
+.detail__bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(8px + var(--safe-top)) 12px 8px;
+  background: rgba(11, 11, 15, 0.82);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid transparent;
+}
+
+.detail__bar--scrolled { border-bottom-color: var(--border); }
+
+.detail__back {
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  margin-inline-start: -6px;
+  border-radius: 50%;
+  font-size: 21px;
+  color: var(--text);
+}
+
+.detail__bartitle {
+  font-size: 15px;
+  font-weight: 700;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.detail__bartitle--visible { opacity: 1; }
+
+/* Poster as a backdrop, faded into the page so text stays readable. */
+.detail__hero { position: relative; }
+
+.detail__herobg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.detail__herobg img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(26px) saturate(1.25);
+  transform: scale(1.25);
+  opacity: 0.4;
+}
+
+.detail__heroscrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(11, 11, 15, 0.25) 0%,
+    rgba(11, 11, 15, 0.8) 62%,
+    var(--bg) 100%
+  );
+}
+
+.detail__heroinner {
+  position: relative;
+  display: flex;
+  gap: 15px;
+  padding: 12px 16px 20px;
+}
+
+.detail__poster {
+  flex-shrink: 0;
+  width: 39vw;
+  max-width: 168px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-elevated);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.6);
+}
+
+.detail__poster img { width: 100%; height: 100%; object-fit: cover; }
+
+.detail__headings { padding-top: 5px; min-width: 0; }
+
+.detail__title {
+  margin: 0;
+  font-size: 23px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.detail__titleen {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.detail__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.detail__fact {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.detail__overview {
+  margin: 0;
+  padding: 0 16px 18px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.detail__chains {
+  padding: 0 16px 14px;
+  font-size: 12px;
+  color: var(--text-faint);
+}

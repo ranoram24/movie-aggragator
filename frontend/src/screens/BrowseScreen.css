@@ -1,0 +1,50 @@
+.browse {
+  padding-top: calc(14px + var(--safe-top));
+}
+
+.browse__header {
+  padding: 6px 16px 16px;
+}
+
+.browse__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 40px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  font-weight: 400;
+  /* Marquee feel without a second font weight. */
+  background: linear-gradient(100deg, var(--text) 40%, var(--accent) 130%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  direction: ltr;
+  text-align: start;
+}
+
+.browse__subtitle {
+  margin: 5px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.browse__sep { opacity: 0.45; }
+.browse__sort { color: var(--accent); font-weight: 600; }
+
+.browse__locnudge {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: calc(100% - 32px);
+  margin: 0 16px 14px;
+  min-height: var(--tap-min);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: start;
+}
+
+.browse__locnudge-icon { font-size: 15px; }

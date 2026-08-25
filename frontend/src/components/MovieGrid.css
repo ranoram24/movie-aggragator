@@ -1,0 +1,19 @@
+.movie-grid {
+  display: grid;
+  /* Two up on a phone; widens on bigger screens without ever going full-bleed. */
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  padding: 0 16px;
+}
+
+@media (min-width: 560px) {
+  .movie-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (min-width: 860px) {
+  .movie-grid {
+    grid-template-columns: repeat(4, 1fr);
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+}

@@ -1,9 +1,12 @@
 import requests
 import json
+import logging
 import re
 from bs4 import BeautifulSoup
 
 BASE = "https://www.cinema-city.co.il"
+
+log = logging.getLogger(__name__)
 
 # A plain Session is enough. The site sets no cookies and none of these
 # endpoints check User-Agent, Referer or X-Requested-With -- verified by
@@ -14,8 +17,10 @@ session = requests.Session()
 def fetch_movies_page():
     url = f"{BASE}/movies"
     response = session.get(url)
-    print(f"Homepage status: {response.status_code}")
-    print(f"Redirect history: {[r.url for r in response.history]}")
+    # Logged rather than printed: this runs inside the API server's background
+    # scheduler, where stray prints end up interleaved in the request log.
+    log.debug("movies page %s, redirects=%s",
+              response.status_code, [r.url for r in response.history])
     return response.text
 
 

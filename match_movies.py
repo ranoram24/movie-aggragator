@@ -18,11 +18,34 @@ def search_tmdb(query: str, language: str = "he-IL"):
     return response.json().get("results", [])
 
 
+# Language/format markers that trail a title. The separator varies by chain:
+# Cinema City writes "-מדובב", Movieland "(מדובב)", Hot Cinema " מדובב לעברית".
+# All three are the same film, so all three have to normalize identically or the
+# same movie shows up as several separate cards.
+DUB_WORDS = r"(?:מדובב(?:ת)?|אנגלית|דובר(?:ת)?\s+עברית)"
+DUB_SUFFIX_RE = re.compile(rf"[\s\-–—]*\(?\s*{DUB_WORDS}(?:\s+ל?\S+)?\s*\)?\s*$")
+
+# Programming strands the cinemas prepend to an ordinary film, e.g.
+# "סינמה נוסטלגיה - פלונטר" is just פלונטר shown in a retro season.
+STRAND_PREFIX_RE = re.compile(r"^\s*(?:סינמה נוסטלגיה|קלאסיקה|מועדון[^-–]{0,20})\s*[-–]\s*")
+
+# Trailing event blurbs, e.g. "לה לה לנד-חגיגות העשור".
+EVENT_SUFFIX_RE = re.compile(r"\s*[-–]\s*(?:חגיגות[^-–]*|הקרנה מיוחדת|שיח יוצרים.*)\s*$")
+
+
 def normalize_title(title: str) -> str:
-    # Strip dub/language suffixes like "-מדובב", "-אנגלית", "-מדובב לצרפתית", etc.
-    # Pattern: a dash, followed by מדובב/אנגלית, optionally followed by
-    # a "ל<language>" word (e.g. "לצרפתית"), anchored to the end of the string.
-    title = re.sub(r"-\s*(מדובב|אנגלית)(\s+ל\S+)?\s*$", "", title)
+    """Strip chain-specific decoration so the same film matches across all five.
+
+    Applied repeatedly because the markers stack -- Hot Cinema produces titles
+    like "סינמה נוסטלגיה - מלך האריות 1994 מדובב לעברית", which needs a prefix
+    and a suffix removed before TMDb has any chance of matching it.
+    """
+    title = STRAND_PREFIX_RE.sub("", title)
+    previous = None
+    while previous != title:
+        previous = title
+        title = DUB_SUFFIX_RE.sub("", title)
+        title = EVENT_SUFFIX_RE.sub("", title)
     return title.strip()
 
 

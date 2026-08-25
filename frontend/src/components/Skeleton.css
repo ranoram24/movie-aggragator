@@ -1,0 +1,25 @@
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  padding: 0 16px;
+}
+
+.skeleton-card {
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius);
+}
+
+.skeleton-detail { padding: 16px; }
+
+.skeleton-hero {
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius);
+  margin-bottom: 18px;
+}
+
+.skeleton-line {
+  height: 14px;
+  border-radius: 7px;
+  margin-bottom: 10px;
+}

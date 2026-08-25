@@ -39,11 +39,6 @@ export interface Showtime {
   spoken_language: string | null;
 }
 
-export interface Chain {
-  key: string;
-  name: string;
-}
-
 export interface DateGroup {
   /** "2026-08-25" */
   date: string;

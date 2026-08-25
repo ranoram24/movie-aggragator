@@ -11,18 +11,13 @@ interface UseMovieResult {
   reload: () => void;
 }
 
-export function useMovie(
-  id: string | undefined,
-  coords: Coords | null,
-  chains: string[] = [],
-): UseMovieResult {
+export function useMovie(id: string | undefined, coords: Coords | null): UseMovieResult {
   const [movie, setMovie] = useState<MovieDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const lat = coords?.lat ?? null;
   const lon = coords?.lon ?? null;
-  const chainKey = chains.slice().sort().join(',');
 
   const load = useCallback(() => {
     if (!id) return;
@@ -30,11 +25,7 @@ export function useMovie(
     setLoading(true);
     setError(null);
 
-    fetchMovie(
-      id,
-      lat !== null && lon !== null ? { lat, lon } : null,
-      chainKey ? chainKey.split(',') : [],
-    )
+    fetchMovie(id, lat !== null && lon !== null ? { lat, lon } : null)
       .then((data) => {
         if (!cancelled) setMovie(data);
       })
@@ -48,7 +39,7 @@ export function useMovie(
     return () => {
       cancelled = true;
     };
-  }, [id, lat, lon, chainKey]);
+  }, [id, lat, lon]);
 
   useEffect(() => load(), [load]);
 

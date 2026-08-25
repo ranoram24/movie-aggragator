@@ -37,3 +37,13 @@
   color: var(--accent-ink);
   font-weight: 700;
 }
+
+/* Count of theatres this chain has for the current film. Helps decide whether
+   a chip is worth tapping before you tap it. */
+.chainfilter__count {
+  margin-inline-start: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}

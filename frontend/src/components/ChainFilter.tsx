@@ -1,21 +1,26 @@
-/** Horizontal chip row for filtering by cinema chain.
+/** Chip row for narrowing a film's screenings to one or more chains.
  *
- *  Scrolls sideways rather than wrapping, so it never pushes the poster grid
- *  below the fold on a small screen. "הכל" is a real chip rather than a
- *  cleared state, so getting back to everything is always one tap. */
+ *  Lives on the detail screen only. The chips are built from the chains that
+ *  actually show THIS film, so there is never a chip that leads to an empty
+ *  list — which is what made the old browse-screen version frustrating.
+ *
+ *  Scrolls sideways rather than wrapping, so it never pushes the showtimes
+ *  below the fold. "הכל" is a real chip rather than a cleared state, so getting
+ *  back to everything is always one tap. */
 
-import type { Chain } from '../api/types';
 import './ChainFilter.css';
 
 interface Props {
-  chains: Chain[];
+  chains: string[];
   selected: string[];
-  onToggle: (key: string) => void;
+  onToggle: (chain: string) => void;
   onClear: () => void;
+  counts?: Record<string, number>;
 }
 
-export function ChainFilter({ chains, selected, onToggle, onClear }: Props) {
-  if (chains.length === 0) return null;
+export function ChainFilter({ chains, selected, onToggle, onClear, counts }: Props) {
+  // One chain means there is nothing to choose between.
+  if (chains.length < 2) return null;
   const all = selected.length === 0;
 
   return (
@@ -29,15 +34,18 @@ export function ChainFilter({ chains, selected, onToggle, onClear }: Props) {
           הכל
         </button>
         {chains.map((chain) => {
-          const on = selected.includes(chain.key);
+          const on = selected.includes(chain);
           return (
             <button
-              key={chain.key}
+              key={chain}
               className={`chainfilter__chip pressable${on ? ' chainfilter__chip--on' : ''}`}
-              onClick={() => onToggle(chain.key)}
+              onClick={() => onToggle(chain)}
               aria-pressed={on}
             >
-              {chain.name}
+              {chain}
+              {counts?.[chain] !== undefined && (
+                <span className="chainfilter__count">{counts[chain]}</span>
+              )}
             </button>
           );
         })}

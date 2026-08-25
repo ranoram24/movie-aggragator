@@ -16,8 +16,11 @@ Note the spelling hazard, same family as Cinema City's: this site's own JS uses
 /order. Unknown parameter names are ignored silently rather than rejected.
 """
 
+import json
 import re
 from datetime import datetime, timedelta
+
+from urllib.parse import quote
 
 from bs4 import BeautifulSoup
 
@@ -35,6 +38,14 @@ TICKET_URL = BASE + "/order?theaterId={theater_id}&eventId={event_id}"
 COORDS_RE = re.compile(r"maps/@(-?\d+\.\d+),(-?\d+\.\d+)")
 MAPS_PLACE_RE = re.compile(r"maps/place/([^/\"?]+)")
 
+# /tickets/movies gives titles and nothing else, so films here used to have no
+# poster at all -- and unlike the other chains there is no fallback, since a
+# poster only ever appeared via the TMDb match. Every page embeds
+# `app.movies = [{"ID":..,"Poster":"NAME-A.jpg",..}]`, which covers all 95
+# titles and resolves under /images/.
+APP_MOVIES_RE = re.compile(r"app\.movies\s*=\s*(\[.*?\]);", re.S)
+POSTER_URL = BASE + "/images/{filename}"
+
 
 class HotCinemaScraper(CinemaScraper):
     source_key = "hot_cinema"
@@ -44,6 +55,7 @@ class HotCinemaScraper(CinemaScraper):
         super().__init__(session)
         self._movies = None
         self._events_by_movie: dict[str, list] = {}
+        self._poster_map: dict[str, str] | None = None
 
     def _movie_rows(self) -> list[dict]:
         if self._movies is None:
@@ -61,12 +73,37 @@ class HotCinemaScraper(CinemaScraper):
         return self._events_by_movie[movie_id]
 
     def get_movies(self) -> list[MovieListing]:
-        # This endpoint carries title only; richer metadata would need one HTML
-        # page fetch per movie, which is not worth ~90 extra requests here.
+        posters = self._posters()
         return [
-            MovieListing(source_movie_id=str(m["MovieId"]), title=m["Name"])
+            MovieListing(
+                source_movie_id=str(m["MovieId"]),
+                title=m["Name"],
+                poster_url=posters.get(str(m["MovieId"])),
+            )
             for m in self._movie_rows()
         ]
+
+    def _posters(self) -> dict[str, str]:
+        """Movie id -> poster URL, from the app.movies blob on the homepage.
+
+        One request for all of them, rather than a page fetch per film.
+        """
+        if self._poster_map is None:
+            self._poster_map = {}
+            try:
+                html = self.session.get(BASE + "/", timeout=30).text
+                match = APP_MOVIES_RE.search(html)
+                if match:
+                    for row in json.loads(match.group(1)):
+                        filename = row.get("Poster")
+                        if row.get("ID") is not None and filename:
+                            self._poster_map[str(row["ID"])] = POSTER_URL.format(
+                                filename=quote(filename)
+                            )
+            except Exception:
+                # A missing poster is cosmetic; never let it break the sync.
+                pass
+        return self._poster_map
 
     def get_theaters(self) -> list[Theater]:
         names: dict[str, str] = {}

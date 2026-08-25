@@ -5,11 +5,11 @@
  * without needing a separate backdrop image the API doesn't have.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useChainSelection } from '../hooks/useChainSelection';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useMovie } from '../hooks/useMovie';
+import { ChainFilter } from '../components/ChainFilter';
 import { TheaterList } from '../components/TheaterList';
 import { DetailSkeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/ErrorState';
@@ -18,11 +18,31 @@ import './MovieDetailScreen.css';
 export function MovieDetailScreen() {
   const { id } = useParams<{ id: string }>();
   const { coords } = useGeolocation();
-  // Carry the browse filter through, so the theatre list matches what the
-  // user narrowed to rather than silently widening again.
-  const { selected } = useChainSelection();
-  const { movie, loading, error, reload } = useMovie(id, coords, selected);
+  const { movie, loading, error, reload } = useMovie(id, coords);
   const [scrolled, setScrolled] = useState(false);
+  const [chains, setChains] = useState<string[]>([]);
+
+  // Filtering happens here rather than server-side: the response already holds
+  // every theatre, so narrowing is instant and costs no request.
+  const availableChains = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const theatre of movie?.theatres ?? []) {
+      seen.set(theatre.chain, (seen.get(theatre.chain) ?? 0) + 1);
+    }
+    return seen;
+  }, [movie]);
+
+  const visibleTheatres = useMemo(() => {
+    const all = movie?.theatres ?? [];
+    return chains.length ? all.filter((t) => chains.includes(t.chain)) : all;
+  }, [movie, chains]);
+
+  const toggleChain = (chain: string) =>
+    setChains((current) =>
+      current.includes(chain)
+        ? current.filter((c) => c !== chain)
+        : [...current, chain],
+    );
 
   // Reveal the title in the sticky bar once the big one scrolls away.
   useEffect(() => {
@@ -31,8 +51,12 @@ export function MovieDetailScreen() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Coming from the grid, the page would otherwise keep the previous scroll.
-  useEffect(() => window.scrollTo(0, 0), [id]);
+  // Coming from the grid, the page would otherwise keep the previous scroll,
+  // and a chain chosen for the last film would silently apply to this one.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    setChains([]);
+  }, [id]);
 
   const facts = movie
     ? [
@@ -100,10 +124,24 @@ export function MovieDetailScreen() {
               than rendering an empty block. */}
           {movie.overview && <p className="detail__overview">{movie.overview}</p>}
 
-          {movie.theatres.length > 0 ? (
-            <TheaterList theatres={movie.theatres} />
+          <ChainFilter
+            chains={[...availableChains.keys()]}
+            selected={chains}
+            onToggle={toggleChain}
+            onClear={() => setChains([])}
+            counts={Object.fromEntries(availableChains)}
+          />
+
+          {visibleTheatres.length > 0 ? (
+            <TheaterList theatres={visibleTheatres} />
           ) : (
-            <EmptyState message="אין הקרנות קרובות לסרט הזה." />
+            <EmptyState
+              message={
+                movie.theatres.length
+                  ? 'אין הקרנות ברשתות שנבחרו.'
+                  : 'אין הקרנות קרובות לסרט הזה.'
+              }
+            />
           )}
         </>
       )}

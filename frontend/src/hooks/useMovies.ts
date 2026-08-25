@@ -18,7 +18,7 @@ interface UseMoviesResult {
   reload: () => void;
 }
 
-export function useMovies(coords: Coords | null, chains: string[] = []): UseMoviesResult {
+export function useMovies(coords: Coords | null): UseMoviesResult {
   const [movies, setMovies] = useState<MovieSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,19 +27,13 @@ export function useMovies(coords: Coords | null, chains: string[] = []): UseMovi
   // with identical numbers would otherwise refetch on every render.
   const lat = coords?.lat ?? null;
   const lon = coords?.lon ?? null;
-  // Same reason as lat/lon: depend on a stable primitive, not the array's
-  // identity, or every render would refetch.
-  const chainKey = chains.slice().sort().join(',');
 
   const load = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    fetchMovies(
-      lat !== null && lon !== null ? { lat, lon } : null,
-      chainKey ? chainKey.split(',') : [],
-    )
+    fetchMovies(lat !== null && lon !== null ? { lat, lon } : null)
       .then((data) => {
         if (!cancelled) setMovies(data);
       })
@@ -53,7 +47,7 @@ export function useMovies(coords: Coords | null, chains: string[] = []): UseMovi
     return () => {
       cancelled = true;
     };
-  }, [lat, lon, chainKey]);
+  }, [lat, lon]);
 
   useEffect(() => load(), [load]);
 

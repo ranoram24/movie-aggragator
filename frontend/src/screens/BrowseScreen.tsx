@@ -1,16 +1,18 @@
 /**
  * "On Cinema" — the app's only tab in v1.
  *
+ * Deliberately unfiltered: one card per film, merging every chain that shows
+ * it. Splitting the grid by chain made the same movie appear several times and
+ * buried the thing you actually want to know, which is "what's on near me".
+ * Choosing a chain belongs on the detail screen, once you've picked a film.
+ *
  * Renders immediately and fetches without coordinates, then refetches once
- * location resolves. The screen must never sit blank behind a permission
+ * location resolves — the screen must never sit blank behind a permission
  * dialog, and must look identical-but-unsorted if permission is refused.
  */
 
-import { useChains } from '../hooks/useChains';
-import { useChainSelection } from '../hooks/useChainSelection';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useMovies } from '../hooks/useMovies';
-import { ChainFilter } from '../components/ChainFilter';
 import { MovieGrid } from '../components/MovieGrid';
 import { MovieGridSkeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/ErrorState';
@@ -18,9 +20,7 @@ import './BrowseScreen.css';
 
 export function BrowseScreen() {
   const { coords, status, retry } = useGeolocation();
-  const chains = useChains();
-  const { selected, toggle, clear } = useChainSelection();
-  const { movies, loading, error, reload } = useMovies(coords, selected);
+  const { movies, loading, error, reload } = useMovies(coords);
 
   const sortLabel =
     status === 'granted' && coords ? 'לפי קרבה אליך' : 'לפי מספר בתי הקולנוע';
@@ -36,13 +36,6 @@ export function BrowseScreen() {
         </p>
       </header>
 
-      <ChainFilter
-        chains={chains}
-        selected={selected}
-        onToggle={toggle}
-        onClear={clear}
-      />
-
       {/* Only nudge when location would actually change the ordering, and never
           block the content behind it. */}
       {(status === 'denied' || status === 'unavailable') && !loading && (
@@ -57,19 +50,10 @@ export function BrowseScreen() {
       )}
 
       {loading && <MovieGridSkeleton count={8} />}
-
       {!loading && error && <ErrorState message={error} onRetry={reload} />}
-
       {!loading && !error && movies.length === 0 && (
-        <EmptyState
-          message={
-            selected.length
-              ? 'אין הקרנות ברשתות שנבחרו.'
-              : 'אין הקרנות זמינות כרגע.'
-          }
-        />
+        <EmptyState message="אין הקרנות זמינות כרגע." />
       )}
-
       {!loading && !error && movies.length > 0 && <MovieGrid movies={movies} />}
     </div>
   );

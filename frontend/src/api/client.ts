@@ -6,7 +6,7 @@
  * one file means a change to the API shape has exactly one place to touch.
  */
 
-import type { Chain, Coords, MovieDetail, MovieSummary } from './types';
+import type { Coords, MovieDetail, MovieSummary } from './types';
 
 // In development .env points this at the separate backend on 8010 (not 8000 --
 // that port is reserved). In production the API is served from the same origin
@@ -59,35 +59,21 @@ async function getJson<T>(path: string, params?: Record<string, string | number 
   return (await response.json()) as T;
 }
 
-/** Films currently playing. Pass coords to sort by distance, chains to filter. */
-export function fetchMovies(
-  coords: Coords | null,
-  chains: string[] = [],
-  limit = 100,
-): Promise<MovieSummary[]> {
+/** Films currently playing. Pass coords to sort by distance. */
+export function fetchMovies(coords: Coords | null, limit = 100): Promise<MovieSummary[]> {
   return getJson<MovieSummary[]>('/api/movies', {
     lat: coords?.lat,
     lon: coords?.lon,
-    // Empty means "all chains" — send nothing rather than an empty string.
-    chains: chains.length ? chains.join(',') : undefined,
     limit,
   });
 }
 
-/** One film, with every theatre showing it. */
-export function fetchMovie(
-  id: string,
-  coords: Coords | null,
-  chains: string[] = [],
-): Promise<MovieDetail> {
+/** One film, with every theatre showing it, from every chain.
+ *  Narrowing to a chain happens in the UI -- the response already holds them
+ *  all, so filtering there is instant and costs no request. */
+export function fetchMovie(id: string, coords: Coords | null): Promise<MovieDetail> {
   return getJson<MovieDetail>(`/api/movies/${encodeURIComponent(id)}`, {
     lat: coords?.lat,
     lon: coords?.lon,
-    chains: chains.length ? chains.join(',') : undefined,
   });
-}
-
-/** Chains available to filter by. */
-export function fetchChains(): Promise<Chain[]> {
-  return getJson<Chain[]>('/api/chains');
 }

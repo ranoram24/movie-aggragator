@@ -19,8 +19,10 @@ box before it is saved, and anything outside is rejected and reported.
 """
 
 import argparse
+import logging
 import re
 import sys
+import threading
 import time
 from math import asin, cos, radians, sin, sqrt
 
@@ -38,6 +40,14 @@ RATE_LIMIT_SECONDS = 1.1  # policy is 1 req/s; leave headroom
 # Nominatim will happily return a same-named street on another continent.
 LAT_RANGE = (29.4, 33.4)
 LON_RANGE = (34.2, 35.9)
+
+log = logging.getLogger(__name__)
+
+# Nominatim rate-limits per IP, and this can be triggered from several places
+# at once -- the scheduler after a sync, and the ingest endpoint after each
+# pushed chain. Overlapping runs previously raced into a 429 and quietly gave
+# up, leaving theatres unlocated for no visible reason. One at a time.
+_RUN_LOCK = threading.Lock()
 
 
 def geocode(session: requests.Session, query: str, settlement_only: bool = False):
@@ -58,6 +68,10 @@ def geocode(session: requests.Session, query: str, settlement_only: bool = False
         timeout=30,
     )
     if response.status_code != 200:
+        # Say so. A 429 or 403 used to be indistinguishable from "no such
+        # address", which is how a rate-limited run looked like a data problem.
+        log.warning("Nominatim returned %s for %r%s", response.status_code, query,
+                    " -- rate limited, slow down" if response.status_code == 429 else "")
         return None
     results = response.json()
     if not results:
@@ -223,85 +237,107 @@ def run(recheck: bool = False, dry_run: bool = False, verbose: bool = False) -> 
     touches rows where latitude is NULL, so it is a no-op once everything is
     located and cheap to call after every sync.
     """
-    db = SessionLocal()
-    http = requests.Session()
-
-    chains = {source.id: source.key for source in db.query(CinemaSource)}
-    query = db.query(Theatre)
-    if not recheck:
-        query = query.filter(Theatre.latitude.is_(None))
-    theatres = query.all()
-
-    if not theatres:
-        _say(verbose, "Nothing to do -- every theatre already has coordinates.")
-        db.close()
+    # One run at a time; see _RUN_LOCK. Non-blocking so an overlapping
+    # trigger is skipped rather than queued -- the later run would only
+    # repeat work the first is already doing.
+    if not _RUN_LOCK.acquire(blocking=False):
+        log.info("geocoding already in progress; skipping this run")
         return 0
 
-    _say(verbose, f"Geocoding {len(theatres)} theatre(s) via Nominatim "
-          f"(~{RATE_LIMIT_SECONDS}s each, ~{len(theatres) * RATE_LIMIT_SECONDS:.0f}s total)\n")
+    # try/finally, because an early return or an exception that left the
+    # lock held would silently disable geocoding for the process's lifetime.
+    try:
 
-    resolved = failed = 0
-    for theatre in theatres:
-        chain = chains.get(theatre.cinema_source_id, "?")
-        variants = address_variants(theatre)
+        db = SessionLocal()
+        http = requests.Session()
 
-        if dry_run:
-            _say(verbose, f"  [dry-run] {chain:12} {theatre.name[:22]:<22}")
-            for v in variants:
-                _say(verbose, f"              try: {v[:66]}")
-            continue
+        chains = {source.id: source.key for source in db.query(CinemaSource)}
+        query = db.query(Theatre)
+        if not recheck:
+            query = query.filter(Theatre.latitude.is_(None))
+        theatres = query.all()
 
-        # Where should this theatre roughly be? Used to reject a hit that
-        # resolved to a same-named street in the wrong town -- the failure mode
-        # that silently sorts a cinema 30km off instead of erroring.
-        city = anchor_city_for(theatre)
-        anchor = city_anchor(http, city) if city else None
+        if not theatres:
+            _say(verbose, "Nothing to do -- every theatre already has coordinates.")
+            db.close()
+            return 0
 
-        hit = None
-        used = ""
-        for variant in variants:
-            candidate = None
-            try:
-                candidate = geocode(http, variant)
-            except Exception as exc:
-                _say(verbose, f"  ERROR   {chain:12} {theatre.name[:22]:<22} "
-                      f"{type(exc).__name__}: {exc}")
-            time.sleep(RATE_LIMIT_SECONDS)
+        _say(verbose, f"Geocoding {len(theatres)} theatre(s) via Nominatim "
+              f"(~{RATE_LIMIT_SECONDS}s each, ~{len(theatres) * RATE_LIMIT_SECONDS:.0f}s total)\n")
 
-            if not candidate:
+        resolved = failed = 0
+        for theatre in theatres:
+            chain = chains.get(theatre.cinema_source_id, "?")
+            variants = address_variants(theatre)
+
+            if dry_run:
+                _say(verbose, f"  [dry-run] {chain:12} {theatre.name[:22]:<22}")
+                for v in variants:
+                    _say(verbose, f"              try: {v[:66]}")
                 continue
 
-            if anchor:
-                away = haversine_km(anchor[0], anchor[1], candidate[0], candidate[1])
-                if away > MAX_CITY_DISTANCE_KM:
-                    _say(verbose, f"  reject  {chain:12} {theatre.name[:22]:<22} "
-                          f"{away:.0f}km from {city} <- {variant[:34]}")
+            # Where should this theatre roughly be? Used to reject a hit that
+            # resolved to a same-named street in the wrong town -- the failure mode
+            # that silently sorts a cinema 30km off instead of erroring.
+            city = anchor_city_for(theatre)
+            anchor = city_anchor(http, city) if city else None
+
+            hit = None
+            used = ""
+            for variant in variants:
+                candidate = None
+                try:
+                    candidate = geocode(http, variant)
+                except Exception as exc:
+                    _say(verbose, f"  ERROR   {chain:12} {theatre.name[:22]:<22} "
+                          f"{type(exc).__name__}: {exc}")
+                time.sleep(RATE_LIMIT_SECONDS)
+
+                if not candidate:
                     continue
 
-            hit = candidate
-            used = variant
-            break
+                if anchor:
+                    away = haversine_km(anchor[0], anchor[1], candidate[0], candidate[1])
+                    if away > MAX_CITY_DISTANCE_KM:
+                        _say(verbose, f"  reject  {chain:12} {theatre.name[:22]:<22} "
+                              f"{away:.0f}km from {city} <- {variant[:34]}")
+                        continue
 
-        if hit:
-            theatre.latitude, theatre.longitude, display = hit
-            resolved += 1
-            _say(verbose, f"  OK      {chain:12} {theatre.name[:22]:<22} "
-                  f"{theatre.latitude:.5f},{theatre.longitude:.5f}  <- {used[:40]}")
-        else:
-            failed += 1
-            _say(verbose, f"  FAILED  {chain:12} {theatre.name[:22]:<22} "
-                  f"({len(variants)} variants tried)")
+                hit = candidate
+                used = variant
+                break
 
-    if not dry_run:
-        db.commit()
-        remaining = db.query(Theatre).filter(Theatre.latitude.is_(None)).count()
-        _say(verbose, f"\nResolved {resolved}, failed {failed}. "
-              f"Theatres still without coordinates: {remaining}")
+            if hit:
+                theatre.latitude, theatre.longitude, display = hit
+                resolved += 1
+                _say(verbose, f"  OK      {chain:12} {theatre.name[:22]:<22} "
+                      f"{theatre.latitude:.5f},{theatre.longitude:.5f}  <- {used[:40]}")
+            elif anchor:
+                # Nothing matched the street, but we do know which town this is in.
+                # A distance measured to the town centre is a few km out; having no
+                # distance at all drops the cinema out of the sorted list entirely,
+                # which is worse. Better roughly right than absent.
+                theatre.latitude, theatre.longitude = anchor
+                resolved += 1
+                _say(verbose, f"  CITY    {chain:12} {theatre.name[:22]:<22} "
+                      f"{anchor[0]:.5f},{anchor[1]:.5f}  <- centre of {city} (approximate)")
+            else:
+                failed += 1
+                _say(verbose, f"  FAILED  {chain:12} {theatre.name[:22]:<22} "
+                      f"({len(variants)} variants tried, no town to fall back to)")
 
-    db.close()
-    return resolved
+        if not dry_run:
+            db.commit()
+            remaining = db.query(Theatre).filter(Theatre.latitude.is_(None)).count()
+            _say(verbose, f"\nResolved {resolved}, failed {failed}. "
+                  f"Theatres still without coordinates: {remaining}")
+
+        db.close()
+        return resolved
 
 
+    finally:
+        _RUN_LOCK.release()
 def _say(verbose: bool, *args) -> None:
     """print() only when running interactively; silent when the scheduler calls."""
     if verbose:

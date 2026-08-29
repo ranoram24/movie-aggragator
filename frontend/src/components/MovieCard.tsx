@@ -6,7 +6,6 @@
 
 import { Link } from 'react-router-dom';
 import type { MovieSummary } from '../api/types';
-import { formatDistance } from '../api/format';
 import { PosterImage } from './PosterImage';
 import './MovieCard.css';
 
@@ -15,8 +14,6 @@ interface Props {
 }
 
 export function MovieCard({ movie }: Props) {
-  const distance = formatDistance(movie.nearest_km);
-
   return (
     <Link to={`/movie/${movie.id}`} className="movie-card pressable">
       <div className="movie-card__poster">
@@ -33,11 +30,11 @@ export function MovieCard({ movie }: Props) {
           {movie.title_en && (
             <p className="movie-card__subtitle">{movie.title_en}</p>
           )}
-          <p className="movie-card__cinemas">
-            {movie.theatre_count} בתי קולנוע
-            {distance && <span className="movie-card__dot"> · </span>}
-            {distance && <span className="movie-card__distance">{distance}</span>}
-          </p>
+          {/* Distance is deliberately not shown. It is haversine, so it
+              disagrees with a driving route by roughly a fifth, and the number
+              invited comparison with Maps without adding much. Proximity still
+              decides the ordering -- it just is not spelled out. */}
+          <p className="movie-card__cinemas">{movie.theatre_count} בתי קולנוע</p>
         </div>
       </div>
     </Link>

@@ -1,7 +1,9 @@
-/** One theatre on the detail screen: where it is, how far, and when it plays. */
+/** One theatre on the detail screen: where it is and when it plays.
+ *
+ *  Distance is not shown — the list is still ordered nearest-first, the
+ *  kilometres are just not spelled out. */
 
 import type { Theatre } from '../api/types';
-import { formatDistance } from '../api/format';
 import { ShowtimeList } from './ShowtimeList';
 import './TheaterCard.css';
 
@@ -13,11 +15,6 @@ export function TheaterCard({ theatre }: { theatre: Theatre }) {
           <h3 className="theater-card__name">{theatre.name}</h3>
           <p className="theater-card__chain">{theatre.chain}</p>
         </div>
-        {theatre.distance_km !== null && (
-          <span className="theater-card__distance">
-            {formatDistance(theatre.distance_km)}
-          </span>
-        )}
       </header>
 
       {theatre.address && <p className="theater-card__address">{theatre.address}</p>}

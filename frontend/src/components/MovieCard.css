@@ -63,5 +63,3 @@
   color: var(--text-dim);
 }
 
-.movie-card__distance { color: var(--accent); font-weight: 600; }
-.movie-card__dot { opacity: 0.5; }

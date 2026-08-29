@@ -25,14 +25,6 @@
   color: var(--text-faint);
 }
 
-.theater-card__distance {
-  flex-shrink: 0;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-}
-
 .theater-card__address {
   margin: 8px 0 0;
   font-size: 13px;

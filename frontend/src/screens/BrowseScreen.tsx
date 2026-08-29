@@ -22,8 +22,8 @@ export function BrowseScreen() {
   const { coords, status, retry } = useGeolocation();
   const { movies, loading, error, reload } = useMovies(coords);
 
-  const sortLabel =
-    status === 'granted' && coords ? 'לפי קרבה אליך' : 'לפי מספר בתי הקולנוע';
+  const sortedByDistance = status === 'granted' && Boolean(coords);
+  const sortLabel = sortedByDistance ? 'לפי קרבה אליך' : 'לפי מספר בתי הקולנוע';
 
   return (
     <div className="browse">
@@ -33,6 +33,12 @@ export function BrowseScreen() {
           מה מוקרן עכשיו
           <span className="browse__sep"> · </span>
           <span className="browse__sort">{sortLabel}</span>
+          {/* Distances are haversine, not driving routes -- roughly 1.2x
+              shorter than the road. Said once here rather than on every chip,
+              and only when distances are actually on screen. */}
+          {sortedByDistance && (
+            <span className="browse__note"> · מרחקים בקו אווירי</span>
+          )}
         </p>
       </header>
 

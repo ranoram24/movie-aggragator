@@ -29,6 +29,12 @@
 }
 
 .browse__sep { opacity: 0.45; }
+
+/* Deliberately quiet: a clarification, not a warning. */
+.browse__note {
+  color: var(--text-faint);
+  font-size: 12px;
+}
 .browse__sort { color: var(--accent); font-weight: 600; }
 
 .browse__locnudge {

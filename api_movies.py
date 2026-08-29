@@ -18,6 +18,7 @@ Two things here are less obvious than they look:
   is empty for every row); poster prefers TMDb but falls back to the chain's.
 """
 
+import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from math import asin, cos, radians, sin, sqrt
@@ -29,6 +30,7 @@ from sqlalchemy.orm import Session
 
 import localtime
 from database import SessionLocal
+from titles import normalize_title
 from models import CinemaSource, Movie, Screening, SourceMovieListing, Theatre
 
 router = APIRouter(prefix="/api", tags=["movies"])
@@ -90,6 +92,9 @@ class MovieDetail(BaseModel):
     genre: str | None = None
     runtime_minutes: int | None = None
     age_rating: str | None = None
+    # The language the film was made in -- a property of the film, unlike a
+    # screening's dub language.
+    original_language: str | None = None
     theatres: list[TheatreOut]
 
 
@@ -128,8 +133,75 @@ def day_label(day: date, today: date) -> str:
     return f"יום {HEBREW_WEEKDAYS[day.weekday()]} {day.strftime('%d/%m')}"
 
 
-def film_key(listing: SourceMovieListing) -> str:
-    return f"m{listing.movie_id}" if listing.movie_id else f"l{listing.id}"
+# A listing whose title is in Cyrillic or Arabic is the foreign-dubbed
+# version, and its poster carries that language's artwork.
+FOREIGN_SCRIPT_RE = re.compile(r"[Ѐ-ӿ؀-ۿ]")
+
+# Preference between chains when several offer a poster, roughly by the size
+# they publish: Planet and Hot Cinema serve full-resolution artwork, Movieland
+# a 295x425 crop, Cinema City only 236x350.
+CHAIN_POSTER_ORDER = {"planet": 0, "hot_cinema": 1, "movieland": 2,
+                      "cinema_city": 3, "lev": 4}
+
+
+def poster_rank(listing: SourceMovieListing, chain_key: str) -> tuple:
+    """Sort key for choosing which poster represents a merged film.
+
+    The chains are preferred over TMDb. TMDb picks a poster per language and
+    falls back to whatever exists, which for a film with no Hebrew artwork can
+    be the Russian one -- that is how "מיניונים ומפלצות" ended up showing a
+    Cyrillic poster. The cinemas always publish the local artwork.
+
+    Within the chains, a listing for a Russian or Arabic dub is deprioritised
+    for the same reason: its poster is in that language.
+    """
+    foreign = bool(FOREIGN_SCRIPT_RE.search(listing.raw_title or ""))
+    return (foreign, CHAIN_POSTER_ORDER.get(chain_key, 9))
+
+
+def title_slug(title: str) -> str:
+    """A stable key from a title, once chain decoration is stripped off."""
+    cleaned = normalize_title(title or "").lower()
+    return re.sub(r"[^\w֐-׿Ѐ-ӿ؀-ۿ]+", "-", cleaned).strip("-")
+
+
+def canonical_movie_ids(db: Session) -> dict[int, int]:
+    """Collapse duplicate TMDb entries for the same film.
+
+    TMDb occasionally carries one film twice -- "Minions & Monsters" exists as
+    both 878357 and 1315772 -- and matching different chains can land on
+    different ids, splitting one film into two cards. Rows sharing an original
+    title AND a release year are treated as the same film, keeping the lowest
+    id. Requiring the year as well as the title is what stops remakes and
+    same-named unrelated films from being merged.
+    """
+    canonical: dict[tuple, int] = {}
+    mapping: dict[int, int] = {}
+    for movie in db.query(Movie).order_by(Movie.id):
+        key = (
+            title_slug(movie.title_en or movie.title_he or ""),
+            (movie.release_date or "")[:4],
+        )
+        if not key[0]:
+            mapping[movie.id] = movie.id
+            continue
+        mapping[movie.id] = canonical.setdefault(key, movie.id)
+    return mapping
+
+
+def film_key(listing: SourceMovieListing, canonical: dict[int, int] | None = None) -> str:
+    """Which card a listing belongs to.
+
+    Matched listings group by their TMDb film, after collapsing TMDb's own
+    duplicates. Unmatched ones group by normalised title instead of by listing
+    id -- otherwise a film TMDb cannot find, like "בחזרה מההימלאיה", gets a
+    separate card for every chain that shows it.
+    """
+    if listing.movie_id:
+        resolved = (canonical or {}).get(listing.movie_id, listing.movie_id)
+        return f"m{resolved}"
+    slug = title_slug(listing.raw_title)
+    return f"t{slug}" if slug else f"l{listing.id}"
 
 
 def _rows(db: Session):
@@ -150,6 +222,13 @@ def _rows(db: Session):
         .filter(Screening.showtime >= localtime.now_iso())
         .all()
     )
+
+
+def best_poster(candidates: list[tuple], tmdb_poster: Optional[str]) -> Optional[str]:
+    """Pick one poster for a merged film: best chain artwork, else TMDb."""
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return tmdb_poster
 
 
 def _chain_filter(chains: Optional[str]) -> set[str]:
@@ -188,6 +267,7 @@ def list_movies(
     db = SessionLocal()
     try:
         films: dict[str, dict] = {}
+        canonical = canonical_movie_ids(db)
 
         for screening, listing, theatre, source, movie in _rows(db):
             # Filtering here rather than in SQL keeps theatre_count and
@@ -195,25 +275,36 @@ def list_movies(
             # asked for, not the full set.
             if wanted and source.key not in wanted:
                 continue
-            key = film_key(listing)
+            key = film_key(listing, canonical)
             film = films.get(key)
             if film is None:
                 film = films[key] = {
                     "id": key,
-                    "title_he": (movie.title_he if movie else None) or listing.raw_title,
+                    "title_he": (movie.title_he if movie else None)
+                                or normalize_title(listing.raw_title)
+                                or listing.raw_title,
                     "title_en": movie.title_en if movie else None,
-                    "poster_url": (movie.poster_url if movie else None) or listing.poster_url,
+                    "poster_url": None,
+                    "tmdb_poster": movie.poster_url if movie else None,
+                    "poster_candidates": [],
                     "theatres": set(),
                     "chains": set(),
                     "nearest_km": None,
                 }
             film["theatres"].add(theatre.id)
             film["chains"].add(source.name or source.key)
+            if listing.poster_url:
+                film["poster_candidates"].append(
+                    (poster_rank(listing, source.key), listing.poster_url)
+                )
 
             distance = _distance(theatre, lat, lon)
             if distance is not None:
                 current = film["nearest_km"]
                 film["nearest_km"] = distance if current is None else min(current, distance)
+
+        for f in films.values():
+            f["poster_url"] = best_poster(f["poster_candidates"], f["tmdb_poster"])
 
         summaries = [
             MovieSummary(
@@ -252,9 +343,10 @@ def movie_detail(
     db = SessionLocal()
     try:
         wanted = _chain_filter(chains)
+        canonical = canonical_movie_ids(db)
         matching = [
             r for r in _rows(db)
-            if film_key(r[1]) == film_id and (not wanted or r[3].key in wanted)
+            if film_key(r[1], canonical) == film_id and (not wanted or r[3].key in wanted)
         ]
         if not matching:
             raise HTTPException(404, f"No current screenings for film '{film_id}'")
@@ -263,19 +355,30 @@ def movie_detail(
         by_theatre: dict[int, dict] = {}
         meta = {"title_he": None, "title_en": None, "poster_url": None,
                 "overview": None, "genre": None, "runtime_minutes": None,
-                "age_rating": None}
+                "age_rating": None, "original_language": None}
+        poster_candidates: list[tuple] = []
+        tmdb_poster = None
 
         for screening, listing, theatre, source, movie in matching:
             # Merge metadata across chains: any chain that supplies a field wins
             # over one that leaves it null, so a film listed by five chains ends
             # up with the union of what they each know.
-            meta["title_he"] = meta["title_he"] or (movie.title_he if movie else None) or listing.raw_title
+            meta["title_he"] = (meta["title_he"]
+                                or (movie.title_he if movie else None)
+                                or normalize_title(listing.raw_title)
+                                or listing.raw_title)
             meta["title_en"] = meta["title_en"] or (movie.title_en if movie else None)
-            meta["poster_url"] = meta["poster_url"] or (movie.poster_url if movie else None) or listing.poster_url
+            if listing.poster_url:
+                poster_candidates.append(
+                    (poster_rank(listing, source.key), listing.poster_url)
+                )
+            tmdb_poster = tmdb_poster or (movie.poster_url if movie else None)
             meta["overview"] = meta["overview"] or (movie.overview if movie else None)
             meta["genre"] = meta["genre"] or listing.genre
             meta["runtime_minutes"] = meta["runtime_minutes"] or listing.runtime_minutes
             meta["age_rating"] = meta["age_rating"] or listing.age_rating
+            meta["original_language"] = (meta["original_language"]
+                                         or (movie.original_language if movie else None))
 
             entry = by_theatre.setdefault(theatre.id, {
                 "id": theatre.id,
@@ -322,6 +425,7 @@ def movie_detail(
                                      t.distance_km if t.distance_km is not None else 0,
                                      t.name))
 
+        meta["poster_url"] = best_poster(poster_candidates, tmdb_poster)
         return MovieDetail(id=film_id, theatres=theatres, **meta)
     finally:
         db.close()

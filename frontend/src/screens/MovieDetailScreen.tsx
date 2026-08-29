@@ -10,6 +10,8 @@ import { Link, useParams } from 'react-router-dom';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useMovie } from '../hooks/useMovie';
 import { ChainFilter } from '../components/ChainFilter';
+import { DubFilter, audioKey, type AudioOption } from '../components/DubFilter';
+import { flagFor, languageName } from '../api/language';
 import { PosterImage } from '../components/PosterImage';
 import { TheaterList } from '../components/TheaterList';
 import { DetailSkeleton } from '../components/Skeleton';
@@ -22,6 +24,7 @@ export function MovieDetailScreen() {
   const { movie, loading, error, reload } = useMovie(id, coords);
   const [scrolled, setScrolled] = useState(false);
   const [chains, setChains] = useState<string[]>([]);
+  const [audio, setAudio] = useState<string[]>([]);
 
   // Filtering happens here rather than server-side: the response already holds
   // every theatre, so narrowing is instant and costs no request.
@@ -33,16 +36,63 @@ export function MovieDetailScreen() {
     return seen;
   }, [movie]);
 
+  // Which spoken-language versions this film actually has, and how many
+  // screenings of each. Derived from the loaded data so a chip can never lead
+  // to an empty list.
+  const audioOptions = useMemo<AudioOption[]>(() => {
+    const tally = new Map<string, AudioOption>();
+    for (const theatre of movie?.theatres ?? []) {
+      for (const group of theatre.dates) {
+        for (const showtime of group.showtimes) {
+          const dubbed = showtime.dubbed_language;
+          const key = audioKey(dubbed);
+          const existing = tally.get(key);
+          if (existing) existing.count += 1;
+          else tally.set(key, { dubbed, count: 1 });
+        }
+      }
+    }
+    // Most screenings first, so the common version leads.
+    return [...tally.values()].sort((a, b) => b.count - a.count);
+  }, [movie]);
+
+  // Both filters apply together, and both prune empty containers as they go:
+  // a date with no matching showtimes, or a theatre with no matching dates,
+  // should disappear rather than render as an empty heading.
   const visibleTheatres = useMemo(() => {
-    const all = movie?.theatres ?? [];
-    return chains.length ? all.filter((t) => chains.includes(t.chain)) : all;
-  }, [movie, chains]);
+    let theatres = movie?.theatres ?? [];
+    if (chains.length) {
+      theatres = theatres.filter((t) => chains.includes(t.chain));
+    }
+    if (!audio.length) return theatres;
+
+    return theatres
+      .map((theatre) => ({
+        ...theatre,
+        dates: theatre.dates
+          .map((group) => ({
+            ...group,
+            showtimes: group.showtimes.filter((s) =>
+              audio.includes(audioKey(s.dubbed_language)),
+            ),
+          }))
+          .filter((group) => group.showtimes.length > 0),
+      }))
+      .filter((theatre) => theatre.dates.length > 0);
+  }, [movie, chains, audio]);
 
   const toggleChain = (chain: string) =>
     setChains((current) =>
       current.includes(chain)
         ? current.filter((c) => c !== chain)
         : [...current, chain],
+    );
+
+  const toggleAudio = (key: string) =>
+    setAudio((current) =>
+      current.includes(key)
+        ? current.filter((a) => a !== key)
+        : [...current, key],
     );
 
   // Reveal the title in the sticky bar once the big one scrolls away.
@@ -57,6 +107,7 @@ export function MovieDetailScreen() {
   useEffect(() => {
     window.scrollTo(0, 0);
     setChains([]);
+    setAudio([]);
   }, [id]);
 
   const facts = movie
@@ -64,6 +115,10 @@ export function MovieDetailScreen() {
         movie.genre,
         movie.runtime_minutes ? `${movie.runtime_minutes} דק'` : null,
         movie.age_rating,
+        // The film's own language, distinct from any screening's dub.
+        movie.original_language
+          ? `${flagFor(movie.original_language) ?? ''} שפת מקור: ${languageName(movie.original_language)}`.trim()
+          : null,
       ].filter((f): f is string => Boolean(f))
     : [];
 
@@ -127,6 +182,13 @@ export function MovieDetailScreen() {
               than rendering an empty block. */}
           {movie.overview && <p className="detail__overview">{movie.overview}</p>}
 
+          <DubFilter
+            options={audioOptions}
+            selected={audio}
+            onToggle={toggleAudio}
+            onClear={() => setAudio([])}
+          />
+
           <ChainFilter
             chains={[...availableChains.keys()]}
             selected={chains}
@@ -141,7 +203,7 @@ export function MovieDetailScreen() {
             <EmptyState
               message={
                 movie.theatres.length
-                  ? 'אין הקרנות ברשתות שנבחרו.'
+                  ? 'אין הקרנות מתאימות לסינון שנבחר.'
                   : 'אין הקרנות קרובות לסרט הזה.'
               }
             />

@@ -40,6 +40,18 @@ export function languageName(code: string | null | undefined): string | null {
 }
 
 /**
+ * Badge text for a dubbed screening.
+ *
+ * Names the language rather than saying a bare "מדובב": a film can be showing
+ * dubbed into Hebrew and dubbed into Russian in the same cinema on the same
+ * day, and "dubbed" alone does not tell you which one you are buying.
+ */
+export function dubBadge(dubbed: string | null | undefined): string | null {
+  if (!dubbed) return null;
+  return `מדובב ל${languageName(dubbed)}`;
+}
+
+/**
  * A short human label for a screening's audio, used as the accessible name and
  * the tooltip. Dubbed and original read differently on purpose: "מדובב" is the
  * decision-relevant word, so it leads.

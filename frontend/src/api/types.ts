@@ -66,6 +66,9 @@ export interface MovieDetail {
   genre: string | null;
   runtime_minutes: number | null;
   age_rating: string | null;
+  /** ISO-639-1 the film was made in. A property of the film, unlike a
+   *  screening's dubbed_language. */
+  original_language: string | null;
   theatres: Theatre[];
 }
 

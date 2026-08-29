@@ -1,0 +1,46 @@
+.dubfilter { margin: 2px 0 10px; }
+
+.dubfilter__scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 16px 4px;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dubfilter__scroll::-webkit-scrollbar { display: none; }
+
+.dubfilter__chip {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+/* Distinct from the chain chips (amber) so two chip rows can sit near each
+   other without reading as one control. */
+.dubfilter__chip--on {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+.dubfilter__count {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}

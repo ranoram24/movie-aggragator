@@ -10,7 +10,7 @@
  *  are separate tickets. */
 
 import type { DateGroup } from '../api/types';
-import { audioLabel, flagFor } from '../api/language';
+import { audioLabel, dubBadge, flagFor } from '../api/language';
 import './ShowtimeList.css';
 
 export function ShowtimeList({ group }: { group: DateGroup }) {
@@ -44,7 +44,9 @@ export function ShowtimeList({ group }: { group: DateGroup }) {
               )}
               <span className="showtime-pill__time">{showtime.time}</span>
               {showtime.dubbed_language && (
-                <span className="showtime-pill__dub">מדובב</span>
+                <span className="showtime-pill__dub">
+                  {dubBadge(showtime.dubbed_language)}
+                </span>
               )}
               {showtime.venue_type !== 'regular' && (
                 <span className="showtime-pill__format">{showtime.venue_type}</span>

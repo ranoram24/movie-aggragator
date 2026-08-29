@@ -108,6 +108,15 @@ def normalize_language(value: Optional[str]) -> Optional[str]:
     return None
 
 
+# A title written in Cyrillic is a Russian-language screening even when no
+# word says so -- Movieland lists these as just "ЧЕЛОВЕК-ПАУК: НОВЫЙ ДЕНЬ".
+CYRILLIC_RE = re.compile(r"[Ѐ-ӿ]")
+
+# A language named on its own, without "מדובב" in front, as Hot Cinema
+# sometimes writes it: "מפרץ ההרפתקאות: אי הדינוזאורים רוסית".
+BARE_LANGUAGE_RE = re.compile(r"\b(רוסית|צרפתית|ספרדית|ערבית)\b")
+
+
 def language_from_title(title: str) -> tuple[Optional[str], Optional[str]]:
     """(dubbed_language, original_language) inferred from a listing's title.
 
@@ -122,6 +131,15 @@ def language_from_title(title: str) -> tuple[Optional[str], Optional[str]]:
     if dub:
         # "מדובב לצרפתית" names its target; a bare "מדובב" means Hebrew.
         return (normalize_language(dub.group(1)) or "he"), None
+
+    # A named language with no "מדובב" still means a dub of that language.
+    bare = BARE_LANGUAGE_RE.search(title)
+    if bare:
+        return normalize_language(bare.group(1)), None
+
+    # Cyrillic in the title and nothing else to go on: a Russian screening.
+    if CYRILLIC_RE.search(title):
+        return "ru", None
 
     if re.search(r"\bאנגלית\b", title):
         return None, "en"

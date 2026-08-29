@@ -11,6 +11,10 @@ class Movie(Base):
     release_date=Column(String)
     runtime_minutes=Column(Integer)
     overview=Column(String)
+    # ISO-639-1 of the language the film was actually made in, from TMDb.
+    # Distinct from a screening's dub: "שפת מקור" is a property of the film,
+    # while dubbed_language is a property of the individual showing.
+    original_language=Column(String)
 
 class CinemaSource(Base):
     __tablename__ = "cinema_sources"

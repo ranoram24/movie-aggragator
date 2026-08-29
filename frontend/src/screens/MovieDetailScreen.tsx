@@ -11,7 +11,7 @@ import { useGeolocation } from '../hooks/useGeolocation';
 import { useMovie } from '../hooks/useMovie';
 import { ChainFilter } from '../components/ChainFilter';
 import { DubFilter, audioKey, type AudioOption } from '../components/DubFilter';
-import { flagFor, languageName } from '../api/language';
+import { languageName } from '../api/language';
 import { PosterImage } from '../components/PosterImage';
 import { TheaterList } from '../components/TheaterList';
 import { DetailSkeleton } from '../components/Skeleton';
@@ -117,7 +117,7 @@ export function MovieDetailScreen() {
         movie.age_rating,
         // The film's own language, distinct from any screening's dub.
         movie.original_language
-          ? `${flagFor(movie.original_language) ?? ''} שפת מקור: ${languageName(movie.original_language)}`.trim()
+          ? `שפת מקור: ${languageName(movie.original_language)}`
           : null,
       ].filter((f): f is string => Boolean(f))
     : [];

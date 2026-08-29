@@ -14,7 +14,7 @@
  *  Built from the languages this film actually has, so a chip is never a dead
  *  end, and hidden entirely when there is only one. */
 
-import { flagFor, languageName } from '../api/language';
+import { languageName } from '../api/language';
 import './DubFilter.css';
 
 export interface AudioOption {
@@ -52,7 +52,6 @@ export function DubFilter({ options, selected, onToggle, onClear }: Props) {
         {options.map((option) => {
           const key = audioKey(option.dubbed);
           const on = selected.includes(key);
-          const flag = flagFor(option.dubbed);
           return (
             <button
               key={key}
@@ -60,7 +59,6 @@ export function DubFilter({ options, selected, onToggle, onClear }: Props) {
               onClick={() => onToggle(key)}
               aria-pressed={on}
             >
-              {flag && <span aria-hidden="true">{flag}</span>}
               <span>
                 {option.dubbed ? `מדובב ל${languageName(option.dubbed)}` : 'שפת מקור'}
               </span>

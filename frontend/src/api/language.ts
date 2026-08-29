@@ -6,18 +6,6 @@
  * often at the same cinema an hour apart, and they are separate tickets.
  */
 
-/** ISO-639-1 -> flag emoji. Flags are drawn from regional indicator pairs. */
-const FLAGS: Record<string, string> = {
-  he: '🇮🇱',
-  en: '🇬🇧',
-  fr: '🇫🇷',
-  ru: '🇷🇺',
-  es: '🇪🇸',
-  ar: '🇸🇦',
-  it: '🇮🇹',
-  de: '🇩🇪',
-};
-
 const NAMES: Record<string, string> = {
   he: 'עברית',
   en: 'אנגלית',
@@ -29,26 +17,25 @@ const NAMES: Record<string, string> = {
   de: 'גרמנית',
 };
 
-export function flagFor(code: string | null | undefined): string | null {
-  if (!code) return null;
-  return FLAGS[code] ?? null;
-}
-
 export function languageName(code: string | null | undefined): string | null {
   if (!code) return null;
   return NAMES[code] ?? code.toUpperCase();
 }
 
 /**
- * Badge text for a dubbed screening.
+ * What the audience will actually hear, as a plain label.
  *
- * Names the language rather than saying a bare "מדובב": a film can be showing
- * dubbed into Hebrew and dubbed into Russian in the same cinema on the same
- * day, and "dubbed" alone does not tell you which one you are buying.
+ * Replaces the older "מדובב לרוסית" badge: whether the audio got there by
+ * dubbing or by being the original language is a distinction the ticket buyer
+ * does not need at the moment of picking a time. They need to know what
+ * language it will be in.
+ *
+ * Returns null when no chain stated it, which is most screenings -- better to
+ * say nothing than to guess or to print a placeholder on every pill.
  */
-export function dubBadge(dubbed: string | null | undefined): string | null {
-  if (!dubbed) return null;
-  return `מדובב ל${languageName(dubbed)}`;
+export function audioLanguageLabel(spoken: string | null | undefined): string | null {
+  if (!spoken) return null;
+  return `שפת שמע: ${languageName(spoken)}`;
 }
 
 /**

@@ -20,7 +20,7 @@ import logging
 import os
 import secrets
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from pydantic import BaseModel
 
 import localtime
@@ -91,8 +91,34 @@ def _check_token(provided: str | None) -> None:
         raise HTTPException(401, "Invalid or missing ingest token.")
 
 
+def _geocode_new_theatres() -> None:
+    """Locate any theatre that arrived without coordinates.
+
+    Runs after the response rather than inside it: geocoding is rate-limited to
+    one request per second and would otherwise hold the push open for half a
+    minute. Only two of the five chains publish their own positions, so an
+    ingested chain that does not -- Movieland -- would otherwise sit unlocated
+    and be excluded from distance sorting entirely.
+    """
+    try:
+        import geocode
+
+        located = geocode.run()
+        if located:
+            log.info("geocoded %s newly ingested theatre(s)", located)
+    except Exception as exc:
+        # Worst case the theatres stay unlocated until the next scheduled sync,
+        # which geocodes everything still missing coordinates.
+        log.warning("post-ingest geocoding skipped: %s: %s", type(exc).__name__, exc)
+
+
 @router.post("/{chain}", response_model=IngestResult)
-def ingest(chain: str, payload: IngestPayload, x_ingest_token: str | None = Header(None)):
+def ingest(
+    chain: str,
+    payload: IngestPayload,
+    background: BackgroundTasks,
+    x_ingest_token: str | None = Header(None),
+):
     """Store one chain's scrape, exactly as a local sync would."""
     _check_token(x_ingest_token)
     if chain not in SCRAPERS:
@@ -141,6 +167,8 @@ def ingest(chain: str, payload: IngestPayload, x_ingest_token: str | None = Head
 
         log.info("ingested %s: %s theatres, %s listings, %s new screenings",
                  chain, len(theatres), len(listings), new_count)
+
+        background.add_task(_geocode_new_theatres)
 
         return IngestResult(
             chain=chain,

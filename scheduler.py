@@ -25,6 +25,7 @@ Intervals can be overridden without editing this file:
     SCRAPE_ON_STARTUP=1            # 0 to wait for the first interval instead
     SCRAPE_MATCH_AFTER_SYNC=1      # 0 to skip the TMDb matching pass
     SCRAPE_GEOCODE_AFTER_SYNC=1    # 0 to skip filling in theatre coordinates
+    SCRAPE_SKIP_CHAINS=movieland,planet   # chains pushed in from outside
 """
 
 import asyncio
@@ -44,6 +45,14 @@ SCRAPE_DAYS = int(os.getenv("SCRAPE_DAYS", 7))
 RUN_ON_STARTUP = os.getenv("SCRAPE_ON_STARTUP", "1") != "0"
 MATCH_AFTER_SYNC = os.getenv("SCRAPE_MATCH_AFTER_SYNC", "1") != "0"
 GEOCODE_AFTER_SYNC = os.getenv("SCRAPE_GEOCODE_AFTER_SYNC", "1") != "0"
+
+# Chains this host must not try to scrape. Movieland and Planet block the
+# production datacenter's IP outright, so attempting them there only produces a
+# failed run and an error in the log every few hours -- their data arrives via
+# the ingest endpoint instead. Left empty locally, where both are reachable.
+SKIP_CHAINS = {
+    c.strip() for c in os.getenv("SCRAPE_SKIP_CHAINS", "").split(",") if c.strip()
+}
 
 # Lev needs ~800 requests through a cascading dropdown flow and takes roughly
 # twelve minutes. Its art-house schedule also changes far less often than a
@@ -195,13 +204,22 @@ async def _chain_loop(key: str, initial_delay: float) -> None:
 
 def start(tasks: list[asyncio.Task]) -> None:
     """Spawn one loop per chain. Called from the app's lifespan startup."""
-    for index, key in enumerate(SCRAPERS):
+    active = [key for key in SCRAPERS if key not in SKIP_CHAINS]
+    for index, key in enumerate(active):
         delay = index * STARTUP_STAGGER if RUN_ON_STARTUP else INTERVALS[key]
         tasks.append(asyncio.create_task(_chain_loop(key, delay), name=f"scrape:{key}"))
+
+    for key in SKIP_CHAINS:
+        # Make the gap visible in /scrape/status rather than leaving these
+        # looking permanently "pending" for no stated reason.
+        if key in STATUS:
+            STATUS[key]["state"] = "external"
+
     log.info(
-        "scheduler started for %s (%s), window=%sd, first run %s",
-        len(SCRAPERS), ", ".join(SCRAPERS), SCRAPE_DAYS,
+        "scheduler started for %s (%s), window=%sd, first run %s%s",
+        len(active), ", ".join(active), SCRAPE_DAYS,
         "on startup" if RUN_ON_STARTUP else "after one interval",
+        f"; pushed externally: {', '.join(sorted(SKIP_CHAINS))}" if SKIP_CHAINS else "",
     )
 
 

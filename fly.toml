@@ -21,6 +21,12 @@ primary_region = "cdg"   # Paris — closest Fly region to Israel for latency
   API_PORT = "8080"
   DATABASE_URL = "sqlite:////data/movie_aggregator.db"
   SCRAPE_DAYS = "7"
+  # Movieland and Planet block this datacenter's IP through Cloudflare -- a
+  # challenge that never resolves and an outright firewall block respectively.
+  # Verified against cloudscraper, TLS fingerprint impersonation and a real
+  # headless Chromium, all of which fail identically. Their data is pushed in
+  # from a machine that can reach them; see push_local.py.
+  SCRAPE_SKIP_CHAINS = "movieland,planet"
 
 [http_service]
   internal_port = 8080

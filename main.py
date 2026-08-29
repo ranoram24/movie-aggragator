@@ -13,6 +13,7 @@ from sqlalchemy import func
 
 import migrate
 import scheduler
+from api_ingest import router as ingest_router
 from api_movies import router as movies_router
 from database import Base, SessionLocal, engine
 from models import CinemaSource, Theatre, SourceMovieListing, Screening
@@ -83,6 +84,9 @@ app.add_middleware(
 # Product API (what's playing / showtimes) lives in its own module; this file
 # stays the scraper control plane.
 app.include_router(movies_router)
+
+# Accepts pushes for chains this host cannot scrape itself (see api_ingest).
+app.include_router(ingest_router)
 
 
 # Response models. Without these FastAPI has no idea what a route returns -- it

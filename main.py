@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func
 
+import migrate
 import scheduler
 from api_movies import router as movies_router
 from database import Base, SessionLocal, engine
@@ -44,6 +45,13 @@ async def lifespan(app: FastAPI):
     # A fresh deploy starts with an empty volume, so the tables have to exist
     # before anything queries them. create_all only creates what is missing.
     Base.metadata.create_all(bind=engine)
+
+    # ...and only whole tables: it will not add a column to a table that
+    # already exists. Without this, adding a field to a model would leave the
+    # deployed database a column short and every query touching it would fail.
+    added = migrate.run()
+    if added:
+        logging.getLogger("scraper").info("schema: added %s missing column(s)", added)
 
     # Startup: begin scraping in the background. This returns immediately --
     # the first scrape runs concurrently, so the API is up right away.

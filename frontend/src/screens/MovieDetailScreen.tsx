@@ -198,7 +198,7 @@ export function MovieDetailScreen() {
           />
 
           {visibleTheatres.length > 0 ? (
-            <TheaterList theatres={visibleTheatres} />
+            <TheaterList theatres={visibleTheatres} from={coords} />
           ) : (
             <EmptyState
               message={

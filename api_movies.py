@@ -80,6 +80,11 @@ class TheatreOut(BaseModel):
     chain: str
     address: str | None = None
     distance_km: float | None = None
+    # Exposed so the client can build a navigation link. Needed because Hot
+    # Cinema publishes almost no addresses but does embed an exact pin on each
+    # venue page, which is the only usable destination for those.
+    latitude: float | None = None
+    longitude: float | None = None
     dates: list[DateGroup]
 
 
@@ -386,6 +391,8 @@ def movie_detail(
                 "chain": source.name or source.key,
                 "address": theatre.address,
                 "distance_km": _distance(theatre, lat, lon),
+                "latitude": theatre.latitude,
+                "longitude": theatre.longitude,
                 "days": defaultdict(list),
             })
 
@@ -418,7 +425,9 @@ def movie_detail(
             ]
             theatres.append(TheatreOut(
                 id=entry["id"], name=entry["name"], chain=entry["chain"],
-                address=entry["address"], distance_km=entry["distance_km"], dates=dates,
+                address=entry["address"], distance_km=entry["distance_km"],
+                latitude=entry["latitude"], longitude=entry["longitude"],
+                dates=dates,
             ))
 
         theatres.sort(key=lambda t: (t.distance_km is None,

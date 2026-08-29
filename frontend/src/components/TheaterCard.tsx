@@ -3,11 +3,18 @@
  *  Distance is not shown — the list is still ordered nearest-first, the
  *  kilometres are just not spelled out. */
 
-import type { Theatre } from '../api/types';
+import type { Coords, Theatre } from '../api/types';
+import { directionsUrl } from '../api/navigation';
 import { ShowtimeList } from './ShowtimeList';
 import './TheaterCard.css';
 
-export function TheaterCard({ theatre }: { theatre: Theatre }) {
+interface Props {
+  theatre: Theatre;
+  /** Where to route from. Null lets Maps use the device's own location. */
+  from: Coords | null;
+}
+
+export function TheaterCard({ theatre, from }: Props) {
   return (
     <section className="theater-card">
       <header className="theater-card__head">
@@ -18,6 +25,18 @@ export function TheaterCard({ theatre }: { theatre: Theatre }) {
       </header>
 
       {theatre.address && <p className="theater-card__address">{theatre.address}</p>}
+
+      {/* Secondary to the showtimes, which are what people came for -- so it
+          sits with the address rather than competing with the time pills. */}
+      <a
+        className="theater-card__nav pressable"
+        href={directionsUrl(theatre, from)}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <span aria-hidden="true">🧭</span>
+        <span>נווט לקולנוע</span>
+      </a>
 
       {theatre.dates.map((group) => (
         <ShowtimeList key={group.date} group={group} />

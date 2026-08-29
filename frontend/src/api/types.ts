@@ -53,6 +53,9 @@ export interface Theatre {
   chain: string;
   address: string | null;
   distance_km: number | null;
+  /** Used to build a navigation link when there is no address. */
+  latitude: number | null;
+  longitude: number | null;
   dates: DateGroup[];
 }
 

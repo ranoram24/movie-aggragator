@@ -17,3 +17,6 @@ cinema_city_movies.html
 
 # Local backups
 *.bak
+
+# Local run log from the scheduled push task
+push.log

@@ -121,6 +121,13 @@ def main() -> int:
             print(f"  pushed -> {result['new_screenings']} new screenings"
                   + (f", {result['skipped_unknown']} unresolvable"
                      if result["skipped_unknown"] else ""))
+            # The server pins each chain's checkout host and drops anything
+            # else. A non-zero count here means either the chain moved its
+            # booking domain or something rewrote the links in transit --
+            # worth seeing in push.log rather than only in the server's logs.
+            if result.get("rejected_urls"):
+                print(f"  WARNING: server refused {result['rejected_urls']} ticket URL(s) "
+                      f"-- run 'python ticket_urls.py' on the server to inspect")
         except SystemExit:
             raise
         except Exception as exc:

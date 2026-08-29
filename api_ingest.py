@@ -17,13 +17,13 @@ from a scraped one once stored.
 """
 
 import logging
-import os
-import secrets
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from pydantic import BaseModel
 
+import auth
 import localtime
+import ticket_urls
 from database import SessionLocal
 from scrapers import SCRAPERS
 from scrapers.base import MovieListing, Showtime, Theater
@@ -31,12 +31,6 @@ from sync import get_or_create_cinema_source, upsert_listing, upsert_screening, 
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 log = logging.getLogger("ingest")
-
-# Shared secret, set as a platform secret. With no token configured the
-# endpoint refuses everything rather than defaulting to open -- an unauthenticated
-# write path would let anyone rewrite the schedule.
-INGEST_TOKEN = os.getenv("INGEST_TOKEN", "")
-
 
 class TheaterIn(BaseModel):
     source_theatre_id: str
@@ -79,16 +73,8 @@ class IngestResult(BaseModel):
     listings: int
     new_screenings: int
     skipped_unknown: int
+    rejected_urls: int
     received_at: str
-
-
-def _check_token(provided: str | None) -> None:
-    if not INGEST_TOKEN:
-        raise HTTPException(503, "Ingest is not configured on this server.")
-    # Constant-time: a plain == leaks the secret one character at a time to
-    # anyone willing to measure.
-    if not provided or not secrets.compare_digest(provided, INGEST_TOKEN):
-        raise HTTPException(401, "Invalid or missing ingest token.")
 
 
 def _finish_ingest() -> None:
@@ -144,7 +130,7 @@ def ingest(
     x_ingest_token: str | None = Header(None),
 ):
     """Store one chain's scrape, exactly as a local sync would."""
-    _check_token(x_ingest_token)
+    auth.check_token(x_ingest_token)
     if chain not in SCRAPERS:
         raise HTTPException(404, f"Unknown chain '{chain}'. Options: {', '.join(SCRAPERS)}")
 
@@ -167,6 +153,7 @@ def ingest(
 
         new_count = 0
         skipped = 0
+        rejected = 0
         # Same in-run dedupe as sync.py: the session is autoflush=False, so a
         # pending insert is invisible to the existence check.
         seen: set[tuple] = set()
@@ -185,12 +172,23 @@ def ingest(
                 continue
             seen.add(key)
 
+            # The token proves the push came from a holder of the secret. It
+            # says nothing about where the URLs inside it point, and this is
+            # the one path by which a string from outside the deployment
+            # becomes a link a user taps to pay. Checked on the way in.
+            reason = ticket_urls.rejection_reason(chain, showtime.ticket_url)
+            if reason:
+                log.warning("ingest %s: refused ticket_url -- %s", chain, reason)
+                rejected += 1
+                continue
+
             if upsert_screening(db, listing.id, theatre.id, showtime):
                 new_count += 1
         db.commit()
 
-        log.info("ingested %s: %s theatres, %s listings, %s new screenings",
-                 chain, len(theatres), len(listings), new_count)
+        log.info("ingested %s: %s theatres, %s listings, %s new screenings%s",
+                 chain, len(theatres), len(listings), new_count,
+                 f", {rejected} REFUSED for bad ticket_url" if rejected else "")
 
         background.add_task(_finish_ingest)
 
@@ -200,6 +198,7 @@ def ingest(
             listings=len(listings),
             new_screenings=new_count,
             skipped_unknown=skipped,
+            rejected_urls=rejected,
             received_at=localtime.now().isoformat(timespec="seconds"),
         )
     except Exception:

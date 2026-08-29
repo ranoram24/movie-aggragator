@@ -12,14 +12,19 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 import traceback
 from datetime import datetime
 
 import localtime
+import ticket_urls
 from database import SessionLocal
 from models import CinemaSource, Theatre, SourceMovieListing, Screening
 from scrapers import SCRAPERS
+
+
+log = logging.getLogger(__name__)
 
 
 def get_or_create_cinema_source(db, key: str, name: str) -> CinemaSource:
@@ -130,6 +135,7 @@ def sync_chain(db, key: str, days: int) -> dict:
     new_count = 0
     skipped_unknown = 0
     duplicates = 0
+    rejected_urls = 0
     # The session is autoflush=False, so a pending INSERT is invisible to the
     # existence query in upsert_screening until the next commit. If a scraper
     # emits the same showing twice in one run, both rows would be written.
@@ -146,12 +152,24 @@ def sync_chain(db, key: str, days: int) -> dict:
             skipped_unknown += 1
             continue
 
-        key = (listing.id, theatre.id, showtime.starts_at,
-               showtime.venue_type, showtime.dubbed_language)
-        if key in seen:
+        # Named `identity`, not `key`: `key` is this function's chain-name
+        # parameter, and assigning the tuple to it shadowed the chain from the
+        # first iteration onward.
+        identity = (listing.id, theatre.id, showtime.starts_at,
+                    showtime.venue_type, showtime.dubbed_language)
+        if identity in seen:
             duplicates += 1
             continue
-        seen.add(key)
+        seen.add(identity)
+
+        reason = ticket_urls.rejection_reason(key, showtime.ticket_url)
+        if reason:
+            # Dropped rather than stored with a blank link: a screening whose
+            # checkout we cannot vouch for is worth less than the risk of
+            # rendering it as a tappable button.
+            log.warning("%s: refused ticket_url -- %s", key, reason)
+            rejected_urls += 1
+            continue
 
         if upsert_screening(db, listing.id, theatre.id, showtime):
             new_count += 1
@@ -163,6 +181,7 @@ def sync_chain(db, key: str, days: int) -> dict:
         "new_screenings": new_count,
         "skipped_unknown": skipped_unknown,
         "duplicates": duplicates,
+        "rejected_urls": rejected_urls,
     }
 
 

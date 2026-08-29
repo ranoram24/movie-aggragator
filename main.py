@@ -4,13 +4,14 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func
 
+import auth
 import migrate
 import scheduler
 from api_ingest import router as ingest_router
@@ -158,9 +159,14 @@ def scrape_status() -> ScrapeStatusResponse:
     }
 
 
-@app.post("/scrape/{chain}")
+@app.post("/scrape/{chain}", dependencies=[Depends(auth.require_token)])
 async def scrape_now(chain: str) -> ScrapeStartedResponse:
-    """Force one chain to scrape immediately, without waiting for its interval."""
+    """Force one chain to scrape immediately, without waiting for its interval.
+
+    Behind the shared token. It was open, which let anyone start real scrapes on
+    demand -- a Lev run takes about twelve minutes, so a handful of calls in a
+    loop would keep the machine busy indefinitely at no cost to the caller.
+    """
     if chain not in SCRAPERS:
         raise HTTPException(404, f"Unknown chain '{chain}'. Options: {', '.join(SCRAPERS)}")
     if scheduler.STATUS[chain]["state"] == "running":

@@ -112,10 +112,20 @@ fly ssh console --app on-cinema-ran
 fly status --app on-cinema-ran
 ```
 
-Force a chain to re-scrape now:
+Force a chain to re-scrape now. This needs the same token as ingest -- it was
+open to anyone, and a Lev run takes about twelve minutes, so it was free work a
+stranger could start at will:
 
 ```bash
-curl -X POST https://on-cinema-ran.fly.dev/scrape/planet
+curl -X POST https://on-cinema-ran.fly.dev/scrape/planet -H "X-Ingest-Token: $INGEST_TOKEN"
+```
+
+Check that no stored ticket link points somewhere unexpected. Worth running
+after a chain changes its booking flow, since a moved checkout host shows up
+here as a refusal rather than as a broken link for users:
+
+```bash
+fly ssh console --app on-cinema-ran --command "python ticket_urls.py"
 ```
 
 Geocode any theatres that arrive without coordinates (rare — only if a chain

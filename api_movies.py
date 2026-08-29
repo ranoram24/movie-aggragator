@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+import localtime
 from database import SessionLocal
 from models import CinemaSource, Movie, Screening, SourceMovieListing, Theatre
 
@@ -143,7 +144,10 @@ def _rows(db: Session):
         .join(Theatre, Theatre.id == Screening.theatre_id)
         .join(CinemaSource, CinemaSource.id == Theatre.cinema_source_id)
         .outerjoin(Movie, Movie.id == SourceMovieListing.movie_id)  # outer: unmatched films
-        .filter(Screening.showtime >= datetime.now().strftime("%Y-%m-%dT%H:%M:%S"))
+        # Israel time, not the server's: showtimes are naive local times, and a
+        # UTC container is 3 hours behind, which surfaced screenings that had
+        # already started.
+        .filter(Screening.showtime >= localtime.now_iso())
         .all()
     )
 
@@ -255,7 +259,7 @@ def movie_detail(
         if not matching:
             raise HTTPException(404, f"No current screenings for film '{film_id}'")
 
-        today = date.today()
+        today = localtime.today()
         by_theatre: dict[int, dict] = {}
         meta = {"title_he": None, "title_en": None, "poster_url": None,
                 "overview": None, "genre": None, "runtime_minutes": None,

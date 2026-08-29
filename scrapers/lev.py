@@ -31,6 +31,7 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
+import localtime
 from .base import (
     CinemaScraper, Theater, MovieListing, Showtime,
     language_from_title, normalize_language,
@@ -158,7 +159,7 @@ class LevScraper(CinemaScraper):
         return list(listings.values())
 
     def get_showtimes(self, days: int = 7) -> list[Showtime]:
-        today = datetime.now().date()
+        today = localtime.today()
         cutoff = today + timedelta(days=days)
 
         showtimes = []

@@ -7,6 +7,7 @@
 import { Link } from 'react-router-dom';
 import type { MovieSummary } from '../api/types';
 import { formatDistance } from '../api/format';
+import { PosterImage } from './PosterImage';
 import './MovieCard.css';
 
 interface Props {
@@ -19,20 +20,11 @@ export function MovieCard({ movie }: Props) {
   return (
     <Link to={`/movie/${movie.id}`} className="movie-card pressable">
       <div className="movie-card__poster">
-        {movie.poster_url ? (
-          <img
-            src={movie.poster_url}
-            alt={movie.title_he}
-            loading="lazy"
-            decoding="async"
-          />
-        ) : (
-          // No poster is common for local/event listings, so it gets a real
-          // fallback rather than a broken-image icon.
-          <div className="movie-card__noposter">
-            <span>{movie.title_he.slice(0, 2)}</span>
-          </div>
-        )}
+        <PosterImage
+          src={movie.poster_url}
+          alt={movie.title_he}
+          fallbackText={movie.title_he}
+        />
 
         <div className="movie-card__scrim" />
 

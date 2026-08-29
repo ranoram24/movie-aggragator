@@ -23,6 +23,7 @@ from scrape_cinema_city import (
     extract_theaters,
     extract_movies,
 )
+import localtime
 from .base import (
     CinemaScraper, Theater, MovieListing, Showtime,
     clean_address, language_from_title,
@@ -34,6 +35,13 @@ PHYSICAL_THEATER_IDS = [1, 2, 3, 4, 5, 13, 17, 25]
 
 TICKET_URL = "https://tickets.cinema-city.co.il/order/{event_id}"
 
+# The /movies page only lists actual films, so live events and one-off
+# screenings arrive with no poster from there. The bulk Events feed does carry
+# a Pic filename for them, which resolves under the site's own /images/.
+# Use the https host, not the raw 80.178.x one it also serves from -- a plain
+# http image would be blocked as mixed content on an https page.
+POSTER_URL = "https://www.cinema-city.co.il/images/{filename}"
+
 
 class CinemaCityScraper(CinemaScraper):
     source_key = "cinema_city"
@@ -43,6 +51,7 @@ class CinemaCityScraper(CinemaScraper):
         super().__init__(session)
         self._html = None
         self._name_to_movie_id = None
+        self._events = None
 
     def _page(self) -> str:
         if self._html is None:
@@ -80,12 +89,24 @@ class CinemaCityScraper(CinemaScraper):
             self._name_to_movie_id = mapping
         return self._name_to_movie_id
 
+    def _bulk_events(self) -> list[dict]:
+        """Every showtime at every theater, in one unparameterised call.
+
+        Cached because both get_movies() (for poster fallbacks) and
+        get_showtimes() need it, and it is a ~200KB response.
+        """
+        if self._events is None:
+            self._events = self.get_json(f"{BASE}/tickets/Events")
+        return self._events
+
     def get_movies(self) -> list[MovieListing]:
         # Metadata (genre/runtime/premiere/age rating) lives on the /movies page
         # and is keyed by MovieId; the API movie list is the authoritative set of
         # what is actually showing. Movies present in one but not the other are
         # normal, so metadata is merged in where available and left null otherwise.
         metadata = {m["movie_id"]: m for m in extract_movies(self._page()) if m["movie_id"]}
+        # Poster of last resort for anything absent from the /movies page.
+        pics = {g["Name"]: g.get("Pic") for g in self._bulk_events() if g.get("Pic")}
 
         listings = []
         for name, movie_id in self._movie_ids_by_name().items():
@@ -95,7 +116,7 @@ class CinemaCityScraper(CinemaScraper):
                 MovieListing(
                     source_movie_id=movie_id,
                     title=name,
-                    poster_url=meta.get("poster_url"),
+                    poster_url=meta.get("poster_url") or self._poster(pics.get(name)),
                     genre=meta.get("genre"),
                     runtime_minutes=int(runtime) if runtime and str(runtime).isdigit() else None,
                     premiere_date=meta.get("premiere_date"),
@@ -104,12 +125,19 @@ class CinemaCityScraper(CinemaScraper):
             )
         return listings
 
+    @staticmethod
+    def _poster(pic: str | None) -> str | None:
+        if not pic:
+            return None
+        from urllib.parse import quote
+        return POSTER_URL.format(filename=quote(pic))
+
     def get_showtimes(self, days: int = 7) -> list[Showtime]:
         # No parameters at all -> every movie, every theater, every date.
-        groups = self.get_json(f"{BASE}/tickets/Events")
+        groups = self._bulk_events()
         name_to_id = self._movie_ids_by_name()
 
-        today = datetime.now().date()
+        today = localtime.today()
         cutoff = today + timedelta(days=days)
 
         showtimes = []

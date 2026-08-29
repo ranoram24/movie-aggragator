@@ -16,6 +16,7 @@ import sys
 import traceback
 from datetime import datetime
 
+import localtime
 from database import SessionLocal
 from models import CinemaSource, Theatre, SourceMovieListing, Screening
 from scrapers import SCRAPERS
@@ -110,7 +111,7 @@ def upsert_screening(db, listing_id: int, theatre_id: int, showtime) -> bool:
     row.original_language = showtime.original_language
     row.subtitled_language = showtime.subtitled_language
     row.ticket_url = showtime.ticket_url
-    row.last_verified_at = datetime.now().isoformat()
+    row.last_verified_at = localtime.now().isoformat()
     return is_new
 
 

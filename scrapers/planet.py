@@ -19,6 +19,7 @@ Two things to watch:
 import re
 from datetime import datetime, timedelta
 
+import localtime
 from .base import CinemaScraper, Theater, MovieListing, Showtime
 
 BASE = "https://www.planetcinema.co.il"
@@ -65,7 +66,7 @@ class PlanetScraper(CinemaScraper):
 
     @staticmethod
     def _until(days: int) -> str:
-        return (datetime.now().date() + timedelta(days=days)).isoformat()
+        return (localtime.today() + timedelta(days=days)).isoformat()
 
     def _cinema_rows(self, days: int = 30) -> list[dict]:
         if self._cinemas is None:
@@ -115,7 +116,7 @@ class PlanetScraper(CinemaScraper):
         return listings
 
     def get_showtimes(self, days: int = 7) -> list[Showtime]:
-        today = datetime.now().date()
+        today = localtime.today()
         cutoff = today + timedelta(days=days)
 
         showtimes = []

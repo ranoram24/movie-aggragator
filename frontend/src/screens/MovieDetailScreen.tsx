@@ -10,6 +10,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useMovie } from '../hooks/useMovie';
 import { ChainFilter } from '../components/ChainFilter';
+import { PosterImage } from '../components/PosterImage';
 import { TheaterList } from '../components/TheaterList';
 import { DetailSkeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/ErrorState';
@@ -97,9 +98,11 @@ export function MovieDetailScreen() {
 
             <div className="detail__heroinner">
               <div className="detail__poster">
-                {movie.poster_url && (
-                  <img src={movie.poster_url} alt={movie.title_he} />
-                )}
+                <PosterImage
+                  src={movie.poster_url}
+                  alt={movie.title_he}
+                  fallbackText={movie.title_he}
+                />
               </div>
 
               <div className="detail__headings">

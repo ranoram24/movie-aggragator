@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
+import localtime
 from .base import (
     CinemaScraper, Theater, MovieListing, Showtime,
     language_from_title, normalize_language,
@@ -118,14 +119,21 @@ class MovielandScraper(CinemaScraper):
 
     @staticmethod
     def _poster(pic: str | None) -> str | None:
-        # Pic is a bare filename, e.g. "דג ושמו באסה (4) (1).jpg"
+        """Pic is a bare filename, e.g. "דג ושמו באסה (4) (1).jpg".
+
+        It resolves through the site's image-resizing cache, not a plain
+        directory. /Content/Movies/ looks like the obvious guess and 404s for
+        every single file -- checked against all 51 posters, 0 worked there and
+        51 worked here. The dimensions are the poster size the site itself
+        requests, so the file is guaranteed to have been generated.
+        """
         if not pic:
             return None
         from urllib.parse import quote
-        return f"{BASE}/Content/Movies/{quote(pic)}"
+        return f"{BASE}/cache/w_295,h_425,mode_crop/{quote(pic)}"
 
     def get_showtimes(self, days: int = 7) -> list[Showtime]:
-        today = datetime.now().date()
+        today = localtime.today()
         cutoff = today + timedelta(days=days)
 
         showtimes = []

@@ -23,15 +23,11 @@ export function languageName(code: string | null | undefined): string | null {
 }
 
 /**
- * What the audience will actually hear, as a plain label.
+ * The dubbed audio language, as a plain label.
  *
- * Replaces the older "מדובב לרוסית" badge: whether the audio got there by
- * dubbing or by being the original language is a distinction the ticket buyer
- * does not need at the moment of picking a time. They need to know what
- * language it will be in.
- *
- * Returns null when no chain stated it, which is most screenings -- better to
- * say nothing than to guess or to print a placeholder on every pill.
+ * Only ever called for dubbed screenings. An unmarked showing is the film in
+ * its original language, which is the default and needs no label -- the same
+ * convention the cinemas use on their own listings.
  */
 export function audioLanguageLabel(spoken: string | null | undefined): string | null {
   if (!spoken) return null;

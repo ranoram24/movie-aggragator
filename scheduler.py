@@ -90,37 +90,13 @@ def _sync_one(key: str) -> dict:
 
 def _match_unmatched() -> dict:
     """Blocking. Links freshly scraped listings to TMDb records."""
-    # Imported lazily: match_movies reads TMDB_TOKEN at import time, and a
-    # missing token should degrade to "matching skipped", not crash the server.
-    from match_movies import find_best_match
-    from models import SourceMovieListing, Movie
+    # Imported lazily so a missing/broken TMDb setup degrades to "matching
+    # skipped" rather than stopping the server from starting.
+    from match_movies import match_unmatched
 
     db = SessionLocal()
-    matched = 0
     try:
-        pending = db.query(SourceMovieListing).filter_by(movie_id=None).all()
-        for listing in pending:
-            match, score = find_best_match(listing.raw_title)
-            if not match:
-                continue
-            movie = db.query(Movie).filter_by(tmdb_id=match["id"]).first()
-            if not movie:
-                poster = match.get("poster_path")
-                movie = Movie(
-                    tmdb_id=match["id"],
-                    title_en=match.get("original_title"),
-                    title_he=match.get("title"),
-                    poster_url=f"https://image.tmdb.org/t/p/w500{poster}" if poster else None,
-                    release_date=match.get("release_date"),
-                    overview=match.get("overview"),
-                )
-                db.add(movie)
-                db.flush()
-            listing.movie_id = movie.id
-            listing.match_confidence = score
-            matched += 1
-        db.commit()
-        return {"considered": len(pending), "matched": matched}
+        return match_unmatched(db)
     except Exception:
         db.rollback()
         raise
@@ -153,6 +129,14 @@ async def _run_once(key: str) -> None:
                     stats = await asyncio.to_thread(_match_unmatched)
                 if stats["matched"]:
                     log.info("tmdb: matched %s new listings", stats["matched"])
+                elif stats["considered"]:
+                    # Worth saying out loud: "considered 170, matched 0" almost
+                    # always means the API rejected us, not that 170 films are
+                    # genuinely unmatchable.
+                    log.warning(
+                        "tmdb: considered %s listings and matched none",
+                        stats["considered"],
+                    )
             except Exception as exc:
                 # Matching is a nice-to-have; a TMDb outage or a missing token
                 # must not mark the scrape itself as failed.

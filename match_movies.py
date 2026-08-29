@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import requests
@@ -11,11 +12,28 @@ load_dotenv()
 token = os.getenv("TMDB_TOKEN")
 
 
+log = logging.getLogger(__name__)
+
+
 def search_tmdb(query: str, language: str = "he-IL"):
     url = "https://api.themoviedb.org/3/search/movie"
     headers = {"Authorization": f"Bearer {token}", "accept": "application/json"}
     params = {"query": query, "language": language}
-    response = requests.get(url, headers=headers, params=params)
+    response = requests.get(url, headers=headers, params=params, timeout=25)
+
+    # A bad token returns 401 with no "results" key, which used to be
+    # indistinguishable from an honest "no match" -- so a misconfigured
+    # deployment matched nothing at all and said nothing about why. Anything
+    # other than 200 is now reported.
+    if response.status_code != 200:
+        log.warning(
+            "TMDb search failed: %s%s",
+            response.status_code,
+            " -- check TMDB_TOKEN is the v4 read token, not the v3 API key"
+            if response.status_code == 401 else "",
+        )
+        return []
+
     return response.json().get("results", [])
 
 
@@ -117,55 +135,57 @@ def _prominence_rank(candidate: dict) -> tuple:
     return (candidate.get("popularity") or 0, int(year) if year.isdigit() else 0)
 
 
-if __name__ == "__main__":
-    db = SessionLocal()
-    listings = db.query(SourceMovieListing).filter_by(movie_id=None).all()
+def match_unmatched(db, verbose: bool = False) -> dict:
+    """Link every unmatched listing to a TMDb film.
 
-    print(f"Found {len(listings)} unmatched listings\n")
+    The single implementation of the matching pass, used both by running this
+    module directly and by the background scheduler. It previously existed
+    twice, and the copy in the scheduler quietly fell behind -- it never
+    fetched canonical details, so films matched on the server came back with a
+    non-Hebrew title and no runtime.
+    """
+    pending = db.query(SourceMovieListing).filter_by(movie_id=None).all()
+    matched = 0
 
-    matched_count = 0
-    unmatched_count = 0
-
-    for listing in listings:
+    for listing in pending:
         match, score = find_best_match(listing.raw_title)
+        if not match:
+            if verbose:
+                print(f"x {listing.raw_title} -> no confident match (best score: {score})")
+            continue
 
-        if match:
-            # Check if we already have this TMDb movie saved
-            movie = db.query(Movie).filter_by(tmdb_id=match["id"]).first()
+        movie = db.query(Movie).filter_by(tmdb_id=match["id"]).first()
+        if not movie:
+            # By id and in Hebrew: the search echoes whatever language it was
+            # queried in and carries no runtime.
+            details = tmdb_details(match["id"]) or match
+            poster_path = details.get("poster_path") or match.get("poster_path")
+            movie = Movie(
+                tmdb_id=match["id"],
+                title_en=details.get("original_title") or match.get("original_title"),
+                title_he=details.get("title") or match.get("title"),
+                poster_url=f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None,
+                release_date=details.get("release_date") or match.get("release_date"),
+                overview=details.get("overview") or match.get("overview"),
+                runtime_minutes=details.get("runtime"),
+                original_language=details.get("original_language"),
+            )
+            db.add(movie)
+            db.flush()
 
-            if not movie:
-                # Fetch the film by id in Hebrew rather than trusting the search
-                # result: the search echoes titles in whichever language it was
-                # queried with, and carries no runtime.
-                details = tmdb_details(match["id"]) or match
-                poster_path = details.get("poster_path") or match.get("poster_path")
-                poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
-
-                movie = Movie(
-                    tmdb_id=match["id"],
-                    title_en=details.get("original_title") or match.get("original_title"),
-                    title_he=details.get("title") or match.get("title"),
-                    poster_url=poster_url,
-                    release_date=details.get("release_date") or match.get("release_date"),
-                    overview=details.get("overview") or match.get("overview"),
-                    runtime_minutes=details.get("runtime"),
-                    original_language=details.get("original_language"),
-                )
-                db.add(movie)
-                db.commit()
-                db.refresh(movie)
-
-            # Link the listing to this movie, with its confidence score
-            listing.movie_id = movie.id
-            listing.match_confidence = score
-            matched_count += 1
-            print(f"✓ {listing.raw_title} -> {movie.title_he} (score: {score})")
-        else:
-            unmatched_count += 1
-            print(f"✗ {listing.raw_title} -> no confident match (best score: {score})")
+        listing.movie_id = movie.id
+        listing.match_confidence = score
+        matched += 1
+        if verbose:
+            print(f"v {listing.raw_title} -> {movie.title_he} (score: {score})")
 
     db.commit()
-    db.close()
-    print(f"\nDone. Matched: {matched_count}, Unmatched: {unmatched_count}")
+    return {"considered": len(pending), "matched": matched}
 
+
+if __name__ == "__main__":
+    db = SessionLocal()
+    stats = match_unmatched(db, verbose=True)
     db.close()
+    print(f"\nDone. Matched: {stats['matched']}, "
+          f"Unmatched: {stats['considered'] - stats['matched']}")

@@ -216,29 +216,28 @@ def address_variants(theatre: Theatre) -> list[str]:
     return out
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Geocode theatres missing coordinates.")
-    parser.add_argument("--recheck", action="store_true",
-                        help="re-geocode every theatre, not just those missing coords")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="print what would be looked up without writing")
-    args = parser.parse_args()
+def run(recheck: bool = False, dry_run: bool = False, verbose: bool = False) -> int:
+    """Geocode theatres and return how many were resolved.
 
+    Callable from the scheduler as well as the CLI. With the defaults it only
+    touches rows where latitude is NULL, so it is a no-op once everything is
+    located and cheap to call after every sync.
+    """
     db = SessionLocal()
     http = requests.Session()
 
     chains = {source.id: source.key for source in db.query(CinemaSource)}
     query = db.query(Theatre)
-    if not args.recheck:
+    if not recheck:
         query = query.filter(Theatre.latitude.is_(None))
     theatres = query.all()
 
     if not theatres:
-        print("Nothing to do -- every theatre already has coordinates.")
+        _say(verbose, "Nothing to do -- every theatre already has coordinates.")
         db.close()
         return 0
 
-    print(f"Geocoding {len(theatres)} theatre(s) via Nominatim "
+    _say(verbose, f"Geocoding {len(theatres)} theatre(s) via Nominatim "
           f"(~{RATE_LIMIT_SECONDS}s each, ~{len(theatres) * RATE_LIMIT_SECONDS:.0f}s total)\n")
 
     resolved = failed = 0
@@ -246,10 +245,10 @@ def main() -> int:
         chain = chains.get(theatre.cinema_source_id, "?")
         variants = address_variants(theatre)
 
-        if args.dry_run:
-            print(f"  [dry-run] {chain:12} {theatre.name[:22]:<22}")
+        if dry_run:
+            _say(verbose, f"  [dry-run] {chain:12} {theatre.name[:22]:<22}")
             for v in variants:
-                print(f"              try: {v[:66]}")
+                _say(verbose, f"              try: {v[:66]}")
             continue
 
         # Where should this theatre roughly be? Used to reject a hit that
@@ -265,7 +264,7 @@ def main() -> int:
             try:
                 candidate = geocode(http, variant)
             except Exception as exc:
-                print(f"  ERROR   {chain:12} {theatre.name[:22]:<22} "
+                _say(verbose, f"  ERROR   {chain:12} {theatre.name[:22]:<22} "
                       f"{type(exc).__name__}: {exc}")
             time.sleep(RATE_LIMIT_SECONDS)
 
@@ -275,7 +274,7 @@ def main() -> int:
             if anchor:
                 away = haversine_km(anchor[0], anchor[1], candidate[0], candidate[1])
                 if away > MAX_CITY_DISTANCE_KM:
-                    print(f"  reject  {chain:12} {theatre.name[:22]:<22} "
+                    _say(verbose, f"  reject  {chain:12} {theatre.name[:22]:<22} "
                           f"{away:.0f}km from {city} <- {variant[:34]}")
                     continue
 
@@ -286,20 +285,37 @@ def main() -> int:
         if hit:
             theatre.latitude, theatre.longitude, display = hit
             resolved += 1
-            print(f"  OK      {chain:12} {theatre.name[:22]:<22} "
+            _say(verbose, f"  OK      {chain:12} {theatre.name[:22]:<22} "
                   f"{theatre.latitude:.5f},{theatre.longitude:.5f}  <- {used[:40]}")
         else:
             failed += 1
-            print(f"  FAILED  {chain:12} {theatre.name[:22]:<22} "
+            _say(verbose, f"  FAILED  {chain:12} {theatre.name[:22]:<22} "
                   f"({len(variants)} variants tried)")
 
-    if not args.dry_run:
+    if not dry_run:
         db.commit()
         remaining = db.query(Theatre).filter(Theatre.latitude.is_(None)).count()
-        print(f"\nResolved {resolved}, failed {failed}. "
+        _say(verbose, f"\nResolved {resolved}, failed {failed}. "
               f"Theatres still without coordinates: {remaining}")
 
     db.close()
+    return resolved
+
+
+def _say(verbose: bool, *args) -> None:
+    """print() only when running interactively; silent when the scheduler calls."""
+    if verbose:
+        print(*args)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Geocode theatres missing coordinates.")
+    parser.add_argument("--recheck", action="store_true",
+                        help="re-geocode every theatre, not just those missing coords")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print what would be looked up without writing")
+    args = parser.parse_args()
+    run(recheck=args.recheck, dry_run=args.dry_run, verbose=True)
     return 0
 
 

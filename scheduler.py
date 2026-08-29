@@ -24,6 +24,7 @@ Intervals can be overridden without editing this file:
     SCRAPE_DAYS=7
     SCRAPE_ON_STARTUP=1            # 0 to wait for the first interval instead
     SCRAPE_MATCH_AFTER_SYNC=1      # 0 to skip the TMDb matching pass
+    SCRAPE_GEOCODE_AFTER_SYNC=1    # 0 to skip filling in theatre coordinates
 """
 
 import asyncio
@@ -42,6 +43,7 @@ LEV_INTERVAL = int(os.getenv("SCRAPE_INTERVAL_LEV", 24 * 60 * 60))          # 24
 SCRAPE_DAYS = int(os.getenv("SCRAPE_DAYS", 7))
 RUN_ON_STARTUP = os.getenv("SCRAPE_ON_STARTUP", "1") != "0"
 MATCH_AFTER_SYNC = os.getenv("SCRAPE_MATCH_AFTER_SYNC", "1") != "0"
+GEOCODE_AFTER_SYNC = os.getenv("SCRAPE_GEOCODE_AFTER_SYNC", "1") != "0"
 
 # Lev needs ~800 requests through a cascading dropdown flow and takes roughly
 # twelve minutes. Its art-house schedule also changes far less often than a
@@ -88,6 +90,22 @@ def _sync_one(key: str) -> dict:
         db.close()
 
 
+def _geocode_missing() -> int:
+    """Blocking. Fills in coordinates for any theatre that lacks them.
+
+    Runs after a sync because a theatre is useless for distance sorting until
+    it has a position, and only two of the five chains publish coordinates
+    themselves. Leaving it as a manual step meant a fresh deploy had 9 of 27
+    theatres located and "sort by nearest" quietly did nothing on the live site.
+
+    Normally a no-op: it only touches rows where latitude is NULL, which after
+    the first pass means just newly-added venues.
+    """
+    import geocode
+
+    return geocode.run()
+
+
 def _match_unmatched() -> dict:
     """Blocking. Links freshly scraped listings to TMDb records."""
     # Imported lazily so a missing/broken TMDb setup degrades to "matching
@@ -122,6 +140,17 @@ async def _run_once(key: str) -> None:
             "%s: %s theatres, %s listings, %s new screenings",
             key, result["theatres"], result["listings"], result["new_screenings"],
         )
+
+        if GEOCODE_AFTER_SYNC:
+            try:
+                async with _write_lock:
+                    located = await asyncio.to_thread(_geocode_missing)
+                if located:
+                    log.info("geocoded %s theatre(s)", located)
+            except Exception as exc:
+                # Nominatim being unreachable must not fail the scrape; the
+                # theatres simply stay unlocated until the next run.
+                log.warning("geocoding skipped: %s: %s", type(exc).__name__, exc)
 
         if MATCH_AFTER_SYNC:
             try:

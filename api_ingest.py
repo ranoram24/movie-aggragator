@@ -91,14 +91,23 @@ def _check_token(provided: str | None) -> None:
         raise HTTPException(401, "Invalid or missing ingest token.")
 
 
-def _geocode_new_theatres() -> None:
-    """Locate any theatre that arrived without coordinates.
+def _finish_ingest() -> None:
+    """The two follow-up passes a scheduled sync normally performs.
 
-    Runs after the response rather than inside it: geocoding is rate-limited to
-    one request per second and would otherwise hold the push open for half a
-    minute. Only two of the five chains publish their own positions, so an
-    ingested chain that does not -- Movieland -- would otherwise sit unlocated
-    and be excluded from distance sorting entirely.
+    Both matter for a pushed chain, and both were previously tied to sync only:
+
+    Geocoding, because just two of the five chains publish their own positions.
+    An ingested chain that does not -- Movieland -- stays unlocated and drops
+    out of distance sorting.
+
+    TMDb matching, because until a listing is matched it cannot merge with the
+    same film from other chains. Straight after a push, Spider-Man appeared
+    twice: once as the matched card and once as an unmatched Movieland/Planet
+    pair.
+
+    Both run after the response is sent. Geocoding is limited to one request a
+    second and matching makes a call per unmatched title, so doing either inline
+    would hold the push open for minutes.
     """
     try:
         import geocode
@@ -107,9 +116,24 @@ def _geocode_new_theatres() -> None:
         if located:
             log.info("geocoded %s newly ingested theatre(s)", located)
     except Exception as exc:
-        # Worst case the theatres stay unlocated until the next scheduled sync,
-        # which geocodes everything still missing coordinates.
+        # Not fatal: the next scheduled sync geocodes whatever is still missing.
         log.warning("post-ingest geocoding skipped: %s: %s", type(exc).__name__, exc)
+
+    try:
+        from match_movies import match_unmatched
+
+        db = SessionLocal()
+        try:
+            stats = match_unmatched(db)
+        finally:
+            db.close()
+        if stats["matched"]:
+            log.info("tmdb: matched %s pushed listing(s)", stats["matched"])
+        elif stats["considered"]:
+            log.warning("tmdb: considered %s listings and matched none",
+                        stats["considered"])
+    except Exception as exc:
+        log.warning("post-ingest matching skipped: %s: %s", type(exc).__name__, exc)
 
 
 @router.post("/{chain}", response_model=IngestResult)
@@ -168,7 +192,7 @@ def ingest(
         log.info("ingested %s: %s theatres, %s listings, %s new screenings",
                  chain, len(theatres), len(listings), new_count)
 
-        background.add_task(_geocode_new_theatres)
+        background.add_task(_finish_ingest)
 
         return IngestResult(
             chain=chain,

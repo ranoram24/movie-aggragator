@@ -20,7 +20,12 @@ primary_region = "cdg"   # Paris — closest Fly region to Israel for latency
   API_HOST = "0.0.0.0"
   API_PORT = "8080"
   DATABASE_URL = "sqlite:////data/movie_aggregator.db"
-  SCRAPE_DAYS = "7"
+  # 9 days, not 7. The chains republish on Tuesday afternoon and the new
+  # schedule runs to Wednesday of the week after -- 8 days past that Tuesday.
+  # The scrapers filter on `today <= date < today + days`, an exclusive bound,
+  # so covering that last Wednesday takes 9. At 7 the tail of a fresh schedule
+  # sat outside the window until a later run caught up.
+  SCRAPE_DAYS = "9"
   # Movieland and Planet block this datacenter's IP through Cloudflare -- a
   # challenge that never resolves and an outright firewall block respectively.
   # Verified against cloudscraper, TLS fingerprint impersonation and a real

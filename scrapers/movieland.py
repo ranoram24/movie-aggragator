@@ -132,7 +132,7 @@ class MovielandScraper(CinemaScraper):
         from urllib.parse import quote
         return f"{BASE}/cache/w_295,h_425,mode_crop/{quote(pic)}"
 
-    def get_showtimes(self, days: int = 7) -> list[Showtime]:
+    def get_showtimes(self, days: int = 9) -> list[Showtime]:
         today = localtime.today()
         cutoff = today + timedelta(days=days)
 

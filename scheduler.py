@@ -21,7 +21,7 @@ Intervals can be overridden without editing this file:
 
     SCRAPE_INTERVAL_LEV=43200      # seconds, per chain
     SCRAPE_INTERVAL_DEFAULT=21600
-    SCRAPE_DAYS=7
+    SCRAPE_DAYS=9
     SCRAPE_ON_STARTUP=1            # 0 to wait for the first interval instead
     SCRAPE_MATCH_AFTER_SYNC=1      # 0 to skip the TMDb matching pass
     SCRAPE_GEOCODE_AFTER_SYNC=1    # 0 to skip filling in theatre coordinates
@@ -41,7 +41,10 @@ log = logging.getLogger("scraper")
 
 DEFAULT_INTERVAL = int(os.getenv("SCRAPE_INTERVAL_DEFAULT", 6 * 60 * 60))   # 6h
 LEV_INTERVAL = int(os.getenv("SCRAPE_INTERVAL_LEV", 24 * 60 * 60))          # 24h
-SCRAPE_DAYS = int(os.getenv("SCRAPE_DAYS", 7))
+# 9 covers a schedule published on Tuesday afternoon through Wednesday of
+# the week after: that last day is 8 past the Tuesday, and the scrapers use
+# an exclusive upper bound (today <= date < today + days), so it needs 9.
+SCRAPE_DAYS = int(os.getenv("SCRAPE_DAYS", 9))
 RUN_ON_STARTUP = os.getenv("SCRAPE_ON_STARTUP", "1") != "0"
 MATCH_AFTER_SYNC = os.getenv("SCRAPE_MATCH_AFTER_SYNC", "1") != "0"
 GEOCODE_AFTER_SYNC = os.getenv("SCRAPE_GEOCODE_AFTER_SYNC", "1") != "0"

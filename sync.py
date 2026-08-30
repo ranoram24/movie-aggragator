@@ -189,7 +189,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sync cinema showtimes into the database.")
     parser.add_argument("chains", nargs="*", default=None,
                         help=f"chains to sync (default: all). options: {', '.join(SCRAPERS)}")
-    parser.add_argument("--days", type=int, default=7, help="days ahead to fetch (default: 7)")
+    parser.add_argument("--days", type=int, default=9, help="days ahead to fetch (default: 9)")
     args = parser.parse_args()
 
     chains = args.chains or list(SCRAPERS)

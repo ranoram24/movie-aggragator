@@ -73,7 +73,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("chains", nargs="*", default=None,
                         help=f"chains to push (default: {', '.join(BLOCKED_CHAINS)})")
-    parser.add_argument("--days", type=int, default=7, help="days ahead to scrape")
+    parser.add_argument("--days", type=int, default=9, help="days ahead to scrape")
     parser.add_argument("--dry-run", action="store_true",
                         help="scrape and report sizes without sending")
     args = parser.parse_args()

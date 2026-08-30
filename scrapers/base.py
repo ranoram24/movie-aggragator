@@ -195,10 +195,10 @@ class CinemaScraper(ABC):
         """All currently-listed titles, with whatever metadata the chain exposes."""
 
     @abstractmethod
-    def get_showtimes(self, days: int = 7) -> list[Showtime]:
+    def get_showtimes(self, days: int = 9) -> list[Showtime]:
         """Every showtime in the next `days` days, across all theaters."""
 
-    def get_movies_at_theater(self, source_theatre_id: str, days: int = 7) -> list[MovieListing]:
+    def get_movies_at_theater(self, source_theatre_id: str, days: int = 9) -> list[MovieListing]:
         """Convenience view: which titles play at one theater.
 
         Derived from get_showtimes() rather than being its own fetch, so bulk

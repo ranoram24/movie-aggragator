@@ -170,7 +170,7 @@ class HotCinemaScraper(CinemaScraper):
 
         return latitude, longitude, address
 
-    def get_showtimes(self, days: int = 7) -> list[Showtime]:
+    def get_showtimes(self, days: int = 9) -> list[Showtime]:
         today = localtime.today()
         cutoff = today + timedelta(days=days)
 

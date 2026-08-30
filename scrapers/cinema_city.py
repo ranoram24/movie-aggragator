@@ -132,7 +132,7 @@ class CinemaCityScraper(CinemaScraper):
         from urllib.parse import quote
         return POSTER_URL.format(filename=quote(pic))
 
-    def get_showtimes(self, days: int = 7) -> list[Showtime]:
+    def get_showtimes(self, days: int = 9) -> list[Showtime]:
         # No parameters at all -> every movie, every theater, every date.
         groups = self._bulk_events()
         name_to_id = self._movie_ids_by_name()

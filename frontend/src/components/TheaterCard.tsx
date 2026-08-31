@@ -4,6 +4,7 @@
  *  kilometres are just not spelled out. */
 
 import type { Coords, Theatre } from '../api/types';
+import { bookingNote } from '../api/booking';
 import { directionsUrl } from '../api/navigation';
 import { ShowtimeList } from './ShowtimeList';
 import './TheaterCard.css';
@@ -15,6 +16,8 @@ interface Props {
 }
 
 export function TheaterCard({ theatre, from }: Props) {
+  const note = bookingNote(theatre.chain);
+
   return (
     <section className="theater-card">
       <header className="theater-card__head">
@@ -37,6 +40,14 @@ export function TheaterCard({ theatre, from }: Props) {
         <span aria-hidden="true">🧭</span>
         <span>נווט לקולנוע</span>
       </a>
+
+      {/* Sits above the times, not below: it only helps if it is read before
+          the tap that it explains. */}
+      {note && (
+        <p className="theater-card__note">
+          <span aria-hidden="true">ℹ️</span> {note}
+        </p>
+      )}
 
       {theatre.dates.map((group) => (
         <ShowtimeList key={group.date} group={group} />

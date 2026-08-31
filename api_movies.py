@@ -20,7 +20,7 @@ Two things here are less obvious than they look:
 
 import re
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from math import asin, cos, radians, sin, sqrt
 from typing import Optional
 

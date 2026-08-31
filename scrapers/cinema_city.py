@@ -1,33 +1,41 @@
 """Cinema City.
 
-The HTML parsing (theatersAll blob + movie metadata cards) is reused verbatim
-from scrape_cinema_city.py -- that code already works and is not rewritten here.
+Two sources make up one chain. The /movies page is server-rendered HTML and is
+the only place the metadata lives -- genre, runtime, premiere date, age rating,
+posters -- alongside a `theatersAll([...])` JavaScript call carrying the theatre
+list. Everything else comes from /tickets/*, a JSON API.
 
-What changed is how showtimes are fetched. The old sync looped
-theater x movie x date with a 0.5s sleep, roughly a thousand requests per run.
-/tickets/Events with NO parameters returns every showtime at every theater in a
-single response, so this does that instead.
+Showtimes come from ONE unparameterised call. /tickets/Events with no query
+string at all returns every showtime at every theatre; the obvious loop over
+theatre x movie x date is about a thousand requests for the same data.
 
-The one catch: the bulk response drops MovieId (it carries only Name +
-ExportCode), and SourceMovieListing keys on MovieId. So get_movies() unions
-MoviesByTheaterAndVenueType across the 8 physical theaters to rebuild a
+The catch is that the bulk response drops MovieId, carrying only Name and
+ExportCode, while SourceMovieListing keys on MovieId. So get_movies() unions
+MoviesByTheaterAndVenueType across the 8 physical theatres to rebuild a
 Name -> MovieId map, and showtimes join back on Name. Verified 50/50 exact,
 zero unmatched.
+
+Note the endpoints disagree about spelling: /tickets/Events takes `TheatreId`
+(British), the others take `theaterId` (American). Model binding is
+case-insensitive but silently ignores names it does not recognise, so the wrong
+spelling returns 200 with unfiltered data rather than an error. Only a hazard
+if you go back to per-theatre calls -- the bulk call passes nothing at all.
+See FIX_NOTES_events_404.txt for the full account.
 """
 
+import json
+import re
 from datetime import datetime, timedelta
 
-from scrape_cinema_city import (
-    BASE,
-    fetch_movies_page,
-    extract_theaters,
-    extract_movies,
-)
+from bs4 import BeautifulSoup
+
 import localtime
 from .base import (
     CinemaScraper, Theater, MovieListing, Showtime,
     clean_address, language_from_title,
 )
+
+BASE = "https://www.cinema-city.co.il"
 
 # One row per physical building. theatersAll also contains VIP/ONYX/Prime/Lounge
 # sub-variants of the same buildings, which would duplicate theaters.
@@ -43,6 +51,56 @@ TICKET_URL = "https://tickets.cinema-city.co.il/order/{event_id}"
 POSTER_URL = "https://www.cinema-city.co.il/images/{filename}"
 
 
+def extract_theaters(html: str) -> list[dict]:
+    """The theatre list, out of the theatersAll([...]) call in the page source."""
+    match = re.search(r"theatersAll\((\[.*?\])\);", html, re.DOTALL)
+    if not match:
+        raise ValueError("Could not find theatersAll JSON in page")
+    return json.loads(match.group(1))
+
+
+def extract_movies(html: str) -> list[dict]:
+    """Film metadata from the poster cards on the /movies page."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    movies = []
+    for block in soup.find_all("div", class_="movie-thumb"):
+        link = block.get("data-linkmobile", "")
+        movie_id = link.split("/")[-1] if link else None
+
+        title_tag = block.find("h2")
+        img_tag = block.find("img", class_="flip-thumb")
+
+        # Metadata lives inside <p class="flip-link"> tags on the back panel,
+        # each shaped like: <p class="flip-link">סיווג <span>קומדיה</span></p>
+        genre = runtime = premiere_date = age_rating = None
+        for p in block.find_all("p", class_="flip-link"):
+            label = p.get_text(strip=True)
+            span = p.find("span")
+            value = span.get_text(strip=True) if span else None
+
+            if "סיווג" in label:
+                genre = value
+            elif "אורך בדקות" in label:
+                runtime = value
+            elif "תאריך בכורה" in label:
+                premiere_date = value
+            elif "הגבלת צפיה" in label:
+                age_rating = value
+
+        movies.append({
+            "movie_id": movie_id,
+            "title": title_tag.get_text(strip=True) if title_tag else None,
+            "poster_url": img_tag.get("src") if img_tag else None,
+            "genre": genre,
+            "runtime": runtime,
+            "premiere_date": premiere_date,
+            "age_rating": age_rating,
+        })
+
+    return movies
+
+
 class CinemaCityScraper(CinemaScraper):
     source_key = "cinema_city"
     source_name = "Cinema City"
@@ -54,8 +112,17 @@ class CinemaCityScraper(CinemaScraper):
         self._events = None
 
     def _page(self) -> str:
+        """The /movies page, fetched once and reused.
+
+        Goes through self.session so it carries the browser User-Agent the base
+        class sets. The site does not check it today -- verified by calling
+        every endpoint from a bare session with no headers at all -- but there
+        is no reason for this one request to be the odd one out.
+        """
         if self._html is None:
-            self._html = fetch_movies_page()
+            response = self.session.get(f"{BASE}/movies", timeout=30)
+            response.raise_for_status()
+            self._html = response.text
         return self._html
 
     def _physical_theaters(self) -> list[dict]:

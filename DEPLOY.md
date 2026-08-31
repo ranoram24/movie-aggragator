@@ -159,11 +159,11 @@ inside the web process, so N workers would mean N copies of every scrape loop
 writing to one SQLite file.
 
 **Redeploying is safe for your data** — the volume is separate from the image.
-But `create_table.py --rebuild` on the server would wipe it.
 
-**If you ever change `models.py`,** the deployed database won't gain the new
-columns automatically; `create_all` only creates missing *tables*, never alters
-existing ones. You'd need to rebuild the volume's database or write a migration.
+**If you change `models.py`,** new columns are added on the next boot.
+`create_all` only creates missing *tables* and never alters an existing one, so
+`migrate.py` runs straight after it and issues the `ALTER TABLE`s for any column
+in the model that the table is missing. It only ever adds, never drops.
 
 **The database file is not in git** (`*.db` is gitignored), so the production
 database is built entirely by scraping. Nothing local is uploaded.

@@ -9,11 +9,9 @@ venv/
 __pycache__/
 *.py[cod]
 
-# Local database (regenerate with create_table.py)
+# Local database. Tables are created on server startup, and the contents are
+# re-derivable by running sync.py, so this is never worth committing.
 *.db
-
-# Scraped page dumps (regenerate with explore_cinema_city.py)
-cinema_city_movies.html
 
 # Local backups
 *.bak

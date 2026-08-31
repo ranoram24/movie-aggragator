@@ -34,7 +34,7 @@ from bs4 import BeautifulSoup
 import localtime
 from .base import (
     CinemaScraper, Theater, MovieListing, Showtime,
-    language_from_title, normalize_language,
+    language_from_title,
 )
 
 BASE = "https://www.lev.co.il"

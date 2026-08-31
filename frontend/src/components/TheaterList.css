@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 4px 16px 0;
+  padding: 4px var(--gutter) 0;
 }
 
 .theater-list__heading {
@@ -24,4 +24,35 @@
   border-radius: 999px;
   background: var(--bg-elevated);
   color: var(--text-dim);
+}
+
+/* ---- desktop --------------------------------------------------------------
+   32 theatre cards in one column is most of why a film page ran to sixteen
+   screens. Two columns roughly halves it, and the cards are self-contained so
+   they tile without any reflow trouble. */
+@media (min-width: 860px) {
+  .theater-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    /* Cards differ in height by design -- one screening versus fifty -- so
+       they align to their top rather than stretching to match. */
+    align-items: start;
+    max-width: var(--content-max);
+    margin-inline: auto;
+  }
+
+  .theater-list__heading {
+    grid-column: 1 / -1;
+    font-size: 28px;
+  }
+}
+
+/* Inside the two-column page layout the outer grid already supplies the
+   gutter and the width cap. */
+@media (min-width: 1024px) {
+  .detail__main .theater-list {
+    padding-inline: 0;
+    max-width: none;
+  }
 }

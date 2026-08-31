@@ -49,3 +49,20 @@
   font-size: 13.5px;
   font-weight: 600;
 }
+
+@media (hover: hover) and (pointer: fine) {
+  .theater-card {
+    transition: border-color 160ms ease, background 160ms ease;
+  }
+  .theater-card:hover { border-color: #3a3a4a; }
+  .theater-card__nav:hover {
+    background: var(--bg-raised);
+    border-color: var(--text-faint);
+    color: var(--text);
+  }
+}
+
+@media (min-width: 860px) {
+  .theater-card { padding: 18px; }
+  .theater-card__name { font-size: 18px; }
+}

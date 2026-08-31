@@ -57,3 +57,22 @@
   color: var(--text-dim);
   white-space: nowrap;
 }
+
+/* The showtime pill is the thing the whole page exists to get you to click,
+   so on a desktop it is the element that should most obviously react to a
+   cursor. Amber on hover matches the accent already used for showtimes. */
+@media (hover: hover) and (pointer: fine) {
+  .showtime-pill {
+    transition: border-color 140ms ease, background 140ms ease,
+                transform 140ms ease;
+  }
+  .showtime-pill:hover {
+    border-color: var(--accent);
+    background: #26262f;
+    transform: translateY(-1px);
+  }
+  .showtime-pill:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}

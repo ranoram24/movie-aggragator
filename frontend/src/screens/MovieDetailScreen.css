@@ -9,6 +9,8 @@
   align-items: center;
   gap: 10px;
   padding: calc(8px + var(--safe-top)) 12px 8px;
+  /* Inner wrapper keeps the back button aligned with the content below it
+     rather than pinned to the window edge. */
   background: rgba(11, 11, 15, 0.82);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -73,7 +75,7 @@
   position: relative;
   display: flex;
   gap: 15px;
-  padding: 12px 16px 20px;
+  padding: 12px var(--gutter) 20px;
 }
 
 .detail__poster {
@@ -123,14 +125,86 @@
 
 .detail__overview {
   margin: 0;
-  padding: 0 16px 18px;
+  padding: 0 var(--gutter) 18px;
+  /* Capped in characters, not pixels: a synopsis ran the full width of the
+     window, which came to 139 characters a line. Comfortable reading is
+     45-75, so long lines were roughly double what the eye can track back
+     from without losing its place. */
+  max-width: 68ch;
   font-size: 14.5px;
   line-height: 1.6;
   color: var(--text-dim);
 }
 
 .detail__chains {
-  padding: 0 16px 14px;
+  padding: 0 var(--gutter) 14px;
   font-size: 12px;
   color: var(--text-faint);
+}
+
+/* ---- desktop --------------------------------------------------------------
+   Everything above is the phone layout and is left alone. Below, the page
+   stops being one very long column: measured at 1680px it ran 15,333px tall,
+   sixteen full screens for a single film, with 117 rows of showtime pills
+   averaging 27% full. */
+
+@media (min-width: 860px) {
+  /* The bar's contents align with the page, not the window edge. */
+  .detail__bar {
+    padding-inline: calc((100vw - var(--content-max)) / 2 + var(--gutter));
+  }
+
+  .detail__heroinner {
+    max-width: var(--content-max);
+    margin: 0 auto;
+    gap: 26px;
+    padding-top: 26px;
+    padding-bottom: 34px;
+  }
+
+  /* 168px is a phone poster. There is room for a real one here. */
+  .detail__poster { width: 240px; max-width: 240px; }
+
+  .detail__headings { padding-top: 14px; }
+  .detail__title { font-size: 40px; }
+  .detail__titleen { font-size: 15px; margin-top: 7px; }
+  .detail__facts { gap: 8px; margin-top: 18px; }
+  .detail__fact { font-size: 12.5px; padding: 5px 12px; }
+
+  .detail__overview { font-size: 15.5px; }
+}
+
+@media (min-width: 1024px) {
+  .detail__body {
+    display: grid;
+    /* Fixed rail, flexible list. minmax(0,1fr) rather than 1fr so a long
+       theatre name cannot blow the column out past its share.
+       360px because the synopsis lives in here: at 320 it wrapped to about
+       40 characters a line, under the comfortable floor of 45. */
+    grid-template-columns: 360px minmax(0, 1fr);
+    gap: 38px;
+    max-width: var(--content-max);
+    margin: 0 auto;
+    padding: 0 var(--gutter);
+    align-items: start;
+  }
+
+  /* Sticky so the filters stay usable however far down the list you are.
+     Offset clears the sticky bar above it. */
+  .detail__rail {
+    position: sticky;
+    top: 78px;
+  }
+
+  /* The grid supplies the gutter now; the children would otherwise double it. */
+  .detail__overview,
+  .detail__rail .chainfilter__scroll,
+  .detail__rail .dubfilter__scroll {
+    padding-inline: 0;
+  }
+
+  .detail__overview {
+    max-width: none;   /* the 320px rail is already narrower than 68ch */
+    padding-bottom: 22px;
+  }
 }

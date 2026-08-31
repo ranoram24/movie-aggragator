@@ -20,7 +20,6 @@ Note the endpoints disagree about spelling: /tickets/Events takes `TheatreId`
 case-insensitive but silently ignores names it does not recognise, so the wrong
 spelling returns 200 with unfiltered data rather than an error. Only a hazard
 if you go back to per-theatre calls -- the bulk call passes nothing at all.
-See FIX_NOTES_events_404.txt for the full account.
 """
 
 import json

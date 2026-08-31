@@ -1,10 +1,14 @@
 /* ---------------------------------------------------------------------------
-   On Cinema — dark, poster-forward, built for a phone held in one hand.
+   On Cinema — dark, poster-forward. Phone first, but not phone only.
 
    Sizing rules that matter on a real device:
    - Tap targets are never smaller than 44px.
    - Body text never below 15px; nothing critical in the top corners.
    - Safe-area insets are honoured so content clears the notch and home bar.
+
+   Desktop rules live in @media blocks at the bottom of each component's file
+   rather than in a separate stylesheet, so the two layouts of one component
+   stay next to each other and cannot drift apart.
    --------------------------------------------------------------------------- */
 
 @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;900&family=Bebas+Neue&display=swap');
@@ -24,6 +28,12 @@
   --accent: #ffb703;        /* marquee amber — used sparingly, for showtimes */
   --accent-ink: #1a1200;
   --live: #4ade80;
+
+  /* The widest content ever gets. The poster grid, the browse header and the
+     detail columns all align to this one number, so nothing floats off on its
+     own at the side of a big screen. */
+  --content-max: 1200px;
+  --gutter: 16px;
 
   --radius: 14px;
   --radius-sm: 9px;
@@ -116,4 +126,23 @@ a {
 .pressable:active {
   transform: scale(0.97);
   opacity: 0.85;
+}
+
+/* On a large monitor 1200px leaves most of the screen empty while the film
+   page is still 12 screens tall. Widening the shared container gives the
+   theatre cards room for more showtime pills per row, which measurably
+   shortens the page rather than just spreading it out: at 1680px it takes a
+   busy film from 11.8 screens to about 10.3, and the cards from 378px to
+   518px. Gated high enough that there is still a real margin at the edges. */
+@media (min-width: 1560px) {
+  :root { --content-max: 1440px; }
+}
+
+/* ---- pointer devices ------------------------------------------------------
+   Hover only where a real cursor exists. On a touchscreen :hover sticks after
+   a tap and leaves an element looking permanently active, which is why the
+   base styles have none. Their absence is also a big part of why the desktop
+   site felt like a phone app: nothing at all responded to the mouse. */
+@media (hover: hover) and (pointer: fine) {
+  .pressable:hover { opacity: 0.92; }
 }

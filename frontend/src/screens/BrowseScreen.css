@@ -3,7 +3,7 @@
 }
 
 .browse__header {
-  padding: 6px 16px 16px;
+  padding: 6px var(--gutter) 16px;
 }
 
 .browse__title {
@@ -36,8 +36,8 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  width: calc(100% - 32px);
-  margin: 0 16px 14px;
+  width: calc(100% - (var(--gutter) * 2));
+  margin: 0 var(--gutter) 14px;
   min-height: var(--tap-min);
   padding: 10px 14px;
   border-radius: var(--radius-sm);
@@ -49,3 +49,32 @@
 }
 
 .browse__locnudge-icon { font-size: 15px; }
+
+/* ---- desktop --------------------------------------------------------------
+   The header used to sit at the far left of the window while the poster grid
+   was centred inside 1200px -- a gap of over 250px between a title and the
+   thing it titles. Both now share one width, so they line up. */
+@media (min-width: 860px) {
+  .browse {
+    padding-top: calc(28px + var(--safe-top));
+  }
+
+  .browse__header,
+  .browse__locnudge {
+    max-width: var(--content-max);
+    margin-inline: auto;
+  }
+
+  .browse__header {
+    padding-bottom: 22px;
+  }
+
+  /* A 40px marquee reads as phone-sized on a large monitor. */
+  .browse__title { font-size: 60px; }
+  .browse__subtitle { font-size: 15px; margin-top: 8px; }
+
+  .browse__locnudge {
+    width: 100%;
+    margin-bottom: 20px;
+  }
+}

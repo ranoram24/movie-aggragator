@@ -12,6 +12,11 @@ __pycache__/
 # Local database. Tables are created on server startup, and the contents are
 # re-derivable by running sync.py, so this is never worth committing.
 *.db
+# SQLite sidecar files. -journal is written mid-transaction and is often
+# present when the DB is open; it got swept into a commit by 'git add -A'.
+*.db-journal
+*.db-wal
+*.db-shm
 
 # Local backups
 *.bak

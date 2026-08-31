@@ -178,36 +178,49 @@ export function MovieDetailScreen() {
             </div>
           </div>
 
-          {/* Absent for films TMDb couldn't match — omitted entirely rather
-              than rendering an empty block. */}
-          {movie.overview && <p className="detail__overview">{movie.overview}</p>}
+          {/* Two columns once there is room for them: what the film IS stays
+              put on one side while the screenings scroll on the other, so the
+              filters remain reachable 30 theatres down instead of being
+              stranded at the top of a very long page. On a phone the grid
+              never engages and this is a plain stack, exactly as before. */}
+          <div className="detail__body">
+            <aside className="detail__rail">
+              {/* Absent for films TMDb couldn't match — omitted entirely rather
+                  than rendering an empty block. */}
+              {movie.overview && (
+                <p className="detail__overview">{movie.overview}</p>
+              )}
 
-          <DubFilter
-            options={audioOptions}
-            selected={audio}
-            onToggle={toggleAudio}
-            onClear={() => setAudio([])}
-          />
+              <DubFilter
+                options={audioOptions}
+                selected={audio}
+                onToggle={toggleAudio}
+                onClear={() => setAudio([])}
+              />
 
-          <ChainFilter
-            chains={[...availableChains.keys()]}
-            selected={chains}
-            onToggle={toggleChain}
-            onClear={() => setChains([])}
-            counts={Object.fromEntries(availableChains)}
-          />
+              <ChainFilter
+                chains={[...availableChains.keys()]}
+                selected={chains}
+                onToggle={toggleChain}
+                onClear={() => setChains([])}
+                counts={Object.fromEntries(availableChains)}
+              />
+            </aside>
 
-          {visibleTheatres.length > 0 ? (
-            <TheaterList theatres={visibleTheatres} from={coords} />
-          ) : (
-            <EmptyState
-              message={
-                movie.theatres.length
-                  ? 'אין הקרנות מתאימות לסינון שנבחר.'
-                  : 'אין הקרנות קרובות לסרט הזה.'
-              }
-            />
-          )}
+            <div className="detail__main">
+              {visibleTheatres.length > 0 ? (
+                <TheaterList theatres={visibleTheatres} from={coords} />
+              ) : (
+                <EmptyState
+                  message={
+                    movie.theatres.length
+                      ? 'אין הקרנות מתאימות לסינון שנבחר.'
+                      : 'אין הקרנות קרובות לסרט הזה.'
+                  }
+                />
+              )}
+            </div>
+          </div>
         </>
       )}
     </div>

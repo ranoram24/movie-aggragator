@@ -44,3 +44,24 @@
   opacity: 0.6;
   font-variant-numeric: tabular-nums;
 }
+
+/* On a phone these are horizontal scroll strips. On a desktop they were still
+   scroll strips -- but measured, they never actually overflowed: scrollWidth
+   equalled clientWidth. A scroll affordance that cannot scroll is pure phone
+   cosplay, so above this width the chips simply wrap. */
+@media (min-width: 860px) {
+  .dubfilter__scroll {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    scroll-snap-type: none;
+    /* Keeps its own gutter here. Between 860 and 1024 the page is still a
+       single column, so nothing else is indenting these chips -- dropping the
+       padding put them flush against the window edge. The rail reclaims it at
+       1024, where the grid supplies the gutter instead. */
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .dubfilter__chip:hover { border-color: var(--text-faint); color: var(--text); }
+  .dubfilter__chip--on:hover { color: inherit; }
+}

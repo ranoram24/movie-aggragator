@@ -63,3 +63,24 @@
   color: var(--text-dim);
 }
 
+
+/* Posters are the only thing on the browse screen worth pointing at, so they
+   are where a cursor should get feedback. */
+@media (hover: hover) and (pointer: fine) {
+  .movie-card__poster {
+    transition: transform 180ms ease, box-shadow 180ms ease;
+  }
+  .movie-card:hover .movie-card__poster {
+    transform: translateY(-4px);
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.6);
+  }
+  .movie-card:focus-visible .movie-card__poster {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+}
+
+@media (min-width: 860px) {
+  .movie-card__title { font-size: 16px; }
+  .movie-card__cinemas { font-size: 12.5px; }
+}

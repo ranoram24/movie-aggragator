@@ -9,11 +9,27 @@ Two things to watch:
    concepts -- age rating ("14-plus"), genre ("horror"), venue type ("imax"),
    plus language plumbing we ignore. They are split apart below.
 
-2. THE BOOKING LINK TRAP. The obvious field, `bookingLink`, is dead -- it 404s,
-   as do compositeBookingLink.bookingUrl and obsoleteBookingUrl. All three point
-   at a retired tickets5.planetcinema.co.il host. Only bookingRouterLaunchLink
-   resolves (302 -> br.planetcinema.co.il/launch/{eventId}). Do not "simplify"
-   this to the shorter-looking field.
+2. THE BOOKING LINK TRAP. None of the four link fields on an event can be
+   handed to a user.
+
+   `bookingLink`, `compositeBookingLink.bookingUrl` and `obsoleteBookingUrl`
+   all 404: they point at a retired tickets5.planetcinema.co.il host.
+
+   `bookingRouterLaunchLink` looks like the survivor -- it returns 200 and
+   redirects to br.planetcinema.co.il/launch/{eventId} -- but that page is only
+   a form that immediately POSTs to tickets5.REL.planetcinema.co.il, and that
+   host answers 403 to everything. Not just to the POST: a bare GET with no
+   token, no body and a real browser gets the Cloudflare "Sorry, you have been
+   blocked" page too. Planet's own router is pointing at a host that is
+   firewalled off, so every visitor sent there is blocked, from any address.
+   Checking the status of the launch link does not catch this, because the 200
+   is one hop before the failure.
+
+   So a screening links to its FILM PAGE instead, with the cinema and date
+   preselected in the hash. That page renders Planet's own quickbook widget --
+   right film, right cinema, right day, times listed -- and costs the user one
+   extra tap on the time. It is the only route into Planet's booking flow that
+   is not blocked.
 """
 
 import re
@@ -63,10 +79,23 @@ class PlanetScraper(CinemaScraper):
     def __init__(self, session=None):
         super().__init__(session)
         self._cinemas = None
+        self._films = None
 
     @staticmethod
     def _until(days: int) -> str:
         return (localtime.today() + timedelta(days=days)).isoformat()
+
+    def _film_links(self, days: int = 30) -> dict[str, str]:
+        """filmId -> canonical film page, straight from the API's own `link`.
+
+        Cached: get_showtimes needs it once per event and it is one request.
+        Built rather than guessed because the URL carries an English slug
+        ("/films/idiots/8462s2r") that is nowhere else in the payload.
+        """
+        if self._films is None:
+            films = self.get_json(f"{API}/films/until/{self._until(days)}")["body"]["films"]
+            self._films = {str(f["id"]): f["link"] for f in films if f.get("link")}
+        return self._films
 
     def _cinema_rows(self, days: int = 30) -> list[dict]:
         if self._cinemas is None:
@@ -145,10 +174,20 @@ class PlanetScraper(CinemaScraper):
                         continue
                     seen_event_ids.add(event_id)
 
-                    # See module docstring: this is the ONLY working link field.
-                    ticket_url = event.get("bookingRouterLaunchLink")
-                    if not ticket_url:
+                    # See module docstring: every per-event link field leads to
+                    # a blocked host, so this points at the film page with the
+                    # cinema and date preselected.
+                    film_id = str(event["filmId"])
+                    film_page = self._film_links().get(film_id)
+                    if not film_page:
                         continue
+                    ticket_url = (
+                        f"{film_page}#/buy-tickets-by-film"
+                        f"?in-cinema={cinema_id}"
+                        f"&at={event.get('businessDay') or date}"
+                        f"&for-movie={film_id}"
+                        f"&view-mode=list"
+                    )
                     try:
                         starts_at = datetime.fromisoformat(event["eventDateTime"])
                     except (ValueError, KeyError, TypeError):
@@ -169,7 +208,7 @@ class PlanetScraper(CinemaScraper):
                     showtimes.append(
                         Showtime(
                             source_theatre_id=cinema_id,
-                            source_movie_id=str(event["filmId"]),
+                            source_movie_id=film_id,
                             starts_at=starts_at.isoformat(),
                             ticket_url=ticket_url,
                             venue_type=venue_type,

@@ -25,7 +25,7 @@ LEGITIMATE = [
     ("hot_cinema", "https://hotcinema.co.il/order?theaterId=16&eventId=147271"),
     ("lev", "https://www.lev.co.il/order/?pcode=604155&loc=לב אבן יהודה"),
     ("movieland", "https://ecom.biggerpicture.ai/site/1293?code=1293-22398&saleChannelCode=web&languageid=he_IL"),
-    ("planet", "https://www.planetcinema.co.il/il/booking-router/launch/316709?lang=he"),
+    ("planet", "https://www.planetcinema.co.il/films/idiots/8462s2r#/buy-tickets-by-film?in-cinema=1025&at=2026-09-01&for-movie=8462s2r&view-mode=list"),
 ]
 
 # (technique, chain, url). Each must be refused.
@@ -40,14 +40,14 @@ ATTACKS = [
     # only looks at the hostname.
     ("open redirect", "planet", "https://www.planetcinema.co.il/go?url=https://evil.example"),
     ("open redirect, encoded", "planet",
-     "https://www.planetcinema.co.il/il/booking-router/x?r=https%3A%2F%2Fevil.example"),
+     "https://www.planetcinema.co.il/films/x?r=https%3A%2F%2Fevil.example"),
     # Double encoding (CWE-174): one unquote turns %252F into %2F, not "/", so
     # a filter that decodes once sees nothing wrong.
     ("open redirect, double-encoded", "planet",
-     "https://www.planetcinema.co.il/il/booking-router/x?r=https%253A%252F%252Fevil.example"),
+     "https://www.planetcinema.co.il/films/x?r=https%253A%252F%252Fevil.example"),
     # Protocol-relative: "//host" inherits the current scheme and is a URL.
     ("protocol-relative", "planet",
-     "https://www.planetcinema.co.il/il/booking-router/x?r=//evil.example"),
+     "https://www.planetcinema.co.il/films/x?r=//evil.example"),
     ("fragment smuggling", "lev", "https://www.lev.co.il/order/#https://evil.example"),
 
     # Semantic URL attack / userinfo spoofing. Everything before "@" is
@@ -67,7 +67,7 @@ ATTACKS = [
     ("data: scheme", "movieland", "data:text/html,<script>alert(1)</script>"),
 
     # Downgrade: an http link carries the booking session in clear text.
-    ("http downgrade", "planet", "http://www.planetcinema.co.il/il/booking-router/launch/1"),
+    ("http downgrade", "planet", "http://www.planetcinema.co.il/films/idiots/8462s2r"),
 
     # Real host, wrong area of the site -- account pages, logout CSRF, anything
     # that is not selling this ticket.
@@ -78,7 +78,7 @@ ATTACKS = [
     ("host from another chain", "planet", "https://ecom.biggerpicture.ai/site/1"),
 
     ("empty", "planet", ""),
-    ("unknown chain", "bogus", "https://www.planetcinema.co.il/il/booking-router/launch/1"),
+    ("unknown chain", "bogus", "https://www.planetcinema.co.il/films/idiots/8462s2r"),
 ]
 
 

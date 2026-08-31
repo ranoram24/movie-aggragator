@@ -52,7 +52,10 @@ ALLOWED: dict[str, tuple[frozenset[str], str]] = {
     # Movieland outsources checkout, so its link legitimately leaves the
     # chain's own domain. That is exactly why it needs pinning.
     "movieland": (frozenset({"ecom.biggerpicture.ai"}), "/site/"),
-    "planet": (frozenset({"planetcinema.co.il", "www.planetcinema.co.il"}), "/il/booking-router/"),
+    # /films/, not /il/booking-router/: that router redirects into a host that
+    # Cloudflare blocks for everyone, so screenings link to the film page with
+    # the cinema and date preselected instead.
+    "planet": (frozenset({"planetcinema.co.il", "www.planetcinema.co.il"}), "/films/"),
 }
 
 # Backwards-compatible view, and the thing to read when you just want the hosts.

@@ -23,3 +23,7 @@ __pycache__/
 
 # Local run log from the scheduled push task
 push.log
+
+# Poster fingerprints already computed by push_local.py, so a repeat run does
+# not re-download every poster. Purely a local speed-up; safe to delete.
+poster_hash_cache.json

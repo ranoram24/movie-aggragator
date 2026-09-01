@@ -63,6 +63,19 @@
   color: var(--text-dim);
 }
 
+/* Dimmer and smaller than the count above it: this is for checking, not for
+   reading every time. One line, clipped rather than wrapped, so a film on all
+   five chains cannot push the title off the poster. */
+.movie-card__chains {
+  margin: 2px 0 0;
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 
 /* Posters are the only thing on the browse screen worth pointing at, so they
    are where a cursor should get feedback. */

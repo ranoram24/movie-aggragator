@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from rapidfuzz import fuzz
 from database import SessionLocal
 from models import SourceMovieListing, Movie
-from titles import normalize_title, title_segments, fold_for_compare
+from titles import normalize_title, title_segments, fold_for_compare, near_identical
 
 load_dotenv()
 token = os.getenv("TMDB_TOKEN")
@@ -135,6 +135,26 @@ def _prominence_rank(candidate: dict) -> tuple:
     return (candidate.get("popularity") or 0, int(year) if year.isdigit() else 0)
 
 
+def find_local_match(db, raw_title: str):
+    """A film we have ALREADY matched whose Hebrew title is the same as this one.
+
+    The fallback for titles TMDb cannot find at all. Two chains spell the same
+    film differently -- "אדיוטים" and "אידיוטים" -- and TMDb returns an empty
+    result set for one of them, so it stays unmatched and becomes a duplicate
+    card for a film that already has one.
+
+    Searching our own movies table instead works because the OTHER spelling has
+    usually already been matched by a chain that used it. Costs no request, and
+    linking to the existing row means the listing inherits the real synopsis,
+    runtime and original language rather than just being visually merged.
+    """
+    cleaned = normalize_title(raw_title)
+    for movie in db.query(Movie).filter(Movie.title_he.isnot(None)):
+        if near_identical(cleaned, movie.title_he):
+            return movie
+    return None
+
+
 def match_unmatched(db, verbose: bool = False) -> dict:
     """Link every unmatched listing to a TMDb film.
 
@@ -147,9 +167,23 @@ def match_unmatched(db, verbose: bool = False) -> dict:
     pending = db.query(SourceMovieListing).filter_by(movie_id=None).all()
     matched = 0
 
+    local = 0
     for listing in pending:
         match, score = find_best_match(listing.raw_title)
         if not match:
+            # TMDb knows nothing about this spelling. Before giving up, see
+            # whether we already hold the same film under the other one.
+            twin = find_local_match(db, listing.raw_title)
+            if twin:
+                listing.movie_id = twin.id
+                listing.match_confidence = 0.0   # matched locally, not by TMDb
+                matched += 1
+                local += 1
+                log.info("spelling variant: %s -> %s (tmdb %s)",
+                         listing.raw_title, twin.title_he, twin.tmdb_id)
+                if verbose:
+                    print(f"~ {listing.raw_title} -> {twin.title_he} (spelling variant)")
+                continue
             if verbose:
                 print(f"x {listing.raw_title} -> no confident match (best score: {score})")
             continue
@@ -180,7 +214,7 @@ def match_unmatched(db, verbose: bool = False) -> dict:
             print(f"v {listing.raw_title} -> {movie.title_he} (score: {score})")
 
     db.commit()
-    return {"considered": len(pending), "matched": matched}
+    return {"considered": len(pending), "matched": matched, "spelling_variants": local}
 
 
 if __name__ == "__main__":

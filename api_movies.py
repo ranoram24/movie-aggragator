@@ -53,6 +53,12 @@ class MovieSummary(BaseModel):
     theatre_count: int
     nearest_km: float | None = None
     chains: list[str]
+    # True only when another card looks like the same film. Everything the
+    # merge rules are confident about has already been merged, so this marks
+    # the leftovers -- close enough to be suspicious, not close enough to join
+    # automatically. The card shows its chains when this is set, which is what
+    # makes an escaped duplicate visible without opening both cards.
+    possible_duplicate: bool = False
 
 
 class ShowtimeOut(BaseModel):
@@ -205,6 +211,12 @@ def film_key(listing: SourceMovieListing, canonical: dict[int, int] | None = Non
     if listing.movie_id:
         resolved = (canonical or {}).get(listing.movie_id, listing.movie_id)
         return f"m{resolved}"
+    # Unmatched, but its poster matches another listing's. Groups films TMDb
+    # cannot find and whose titles do not resemble each other at all -- the
+    # three chains listing one opera as "לה טראוויאטה - אופרה בקולנוע",
+    # "אופרה בקולנוע-לה טראוויאטה" and "אופרה: לה טראוויאטה – מבית האופרה".
+    if listing.poster_group:
+        return f"p{listing.poster_group}"
     slug = title_slug(listing.raw_title)
     return f"t{slug}" if slug else f"l{listing.id}"
 
@@ -225,6 +237,11 @@ def _rows(db: Session):
         # UTC container is 3 hours behind, which surfaced screenings that had
         # already started.
         .filter(Screening.showtime >= localtime.now_iso())
+        # Retired by validate.py: the chain has stopped listing it, or says it
+        # is sold out. isnot(False) rather than == True on purpose -- NULL means
+        # "never validated" (Lev, or anything added since the last pass) and
+        # must still show. Only a positive finding hides a screening.
+        .filter(Screening.is_available.isnot(False))
         .all()
     )
 
@@ -234,6 +251,35 @@ def best_poster(candidates: list[tuple], tmdb_poster: Optional[str]) -> Optional
     if candidates:
         return min(candidates, key=lambda item: item[0])[1]
     return tmdb_poster
+
+
+# Posters of the same film measured 0-10 apart and different films 112+.
+# Merging happens at 25 (see posters.MAX_DISTANCE); anything still separate but
+# within this wider band is the grey area worth flagging rather than merging.
+SUSPICIOUS_POSTER_DISTANCE = 45
+
+
+def flag_possible_duplicates(films: list[dict]) -> None:
+    """Mark cards that another card resembles too closely for comfort.
+
+    Two independent signals, because either can be missing: the poster hash
+    (absent when a chain publishes no artwork) and the title (useless when the
+    chains word it completely differently). Anything caught here escaped the
+    merge rules, so it is shown rather than acted on.
+    """
+    import posters
+    from titles import near_identical
+
+    for i, a in enumerate(films):
+        for b in films[i + 1:]:
+            same_poster = (
+                a.get("poster_hash") and b.get("poster_hash")
+                and posters.distance(a["poster_hash"], b["poster_hash"])
+                <= SUSPICIOUS_POSTER_DISTANCE
+            )
+            if same_poster or near_identical(a.get("title_he"), b.get("title_he")):
+                a["possible_duplicate"] = True
+                b["possible_duplicate"] = True
 
 
 def _chain_filter(chains: Optional[str]) -> set[str]:
@@ -294,10 +340,16 @@ def list_movies(
                     "poster_candidates": [],
                     "theatres": set(),
                     "chains": set(),
+                    "possible_duplicate": False,
+                    "poster_hash": None,
                     "nearest_km": None,
                 }
             film["theatres"].add(theatre.id)
             film["chains"].add(source.name or source.key)
+            # Any listing's hash identifies the card; they are all within the
+            # merge threshold of each other by definition.
+            if film["poster_hash"] is None and listing.poster_hash:
+                film["poster_hash"] = listing.poster_hash
             if listing.poster_url:
                 film["poster_candidates"].append(
                     (poster_rank(listing, source.key), listing.poster_url)
@@ -311,6 +363,8 @@ def list_movies(
         for f in films.values():
             f["poster_url"] = best_poster(f["poster_candidates"], f["tmdb_poster"])
 
+        flag_possible_duplicates(list(films.values()))
+
         summaries = [
             MovieSummary(
                 id=f["id"],
@@ -320,6 +374,7 @@ def list_movies(
                 theatre_count=len(f["theatres"]),
                 nearest_km=f["nearest_km"],
                 chains=sorted(f["chains"]),
+                possible_duplicate=f["possible_duplicate"],
             )
             for f in films.values()
         ]

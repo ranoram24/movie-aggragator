@@ -14,6 +14,10 @@ beautifulsoup4==4.15.0
 python-dotenv==1.2.3
 RapidFuzz==3.14.5
 pydantic==2.13.4
+# Decodes posters so the same film can be recognised across chains by its
+# artwork, which is the only key the chains agree on -- see posters.py.
+Pillow==12.3.0
+
 # Supplies the tz database. Windows ships none, and slim Linux images often
 # omit it -- without this, Asia/Jerusalem cannot be resolved and showtime
 # filtering silently falls back to the wrong clock.

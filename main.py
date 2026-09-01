@@ -122,6 +122,13 @@ class ScrapeStatusResponse(BaseModel):
     window_days: int
     intervals_seconds: dict[str, int]
     chains: dict[str, ChainStatus]
+    # The second freshness layer. Kept in its own block rather than merged into
+    # `chains`, because a chain can be scraping happily while having no cheap
+    # way to be validated -- Lev, for one -- and flattening the two would make
+    # that look like a failure.
+    validation_horizon_hours: int
+    validation_intervals_seconds: dict[str, int]
+    validation: dict[str, dict]
 
 
 class ScrapeStartedResponse(BaseModel):
@@ -156,6 +163,14 @@ def scrape_status() -> ScrapeStatusResponse:
         "window_days": scheduler.SCRAPE_DAYS,
         "intervals_seconds": scheduler.INTERVALS,
         "chains": scheduler.STATUS,
+        "validation_horizon_hours": scheduler.VALIDATION_HORIZON_HOURS,
+        "validation_intervals_seconds": {
+            key: scheduler.VALIDATION_INTERVALS.get(
+                key, scheduler.VALIDATION_INTERVAL_DEFAULT
+            )
+            for key in scheduler.VALIDATION_STATUS
+        },
+        "validation": scheduler.VALIDATION_STATUS,
     }
 
 

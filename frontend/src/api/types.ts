@@ -21,6 +21,9 @@ export interface MovieSummary {
   /** null when location is unavailable, or when no showing theatre is geocoded. */
   nearest_km: number | null;
   chains: string[];
+  /** Another card looks like the same film; the card names its chains so the
+   *  split is visible without opening both. */
+  possible_duplicate: boolean;
 }
 
 export interface Showtime {

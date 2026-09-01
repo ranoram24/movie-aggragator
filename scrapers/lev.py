@@ -21,8 +21,13 @@ pcode but no clock time:
     get_movies(location) -> get_types(movie) -> get_dates(movie) -> get_times(date)
 Each step needs data-* attributes threaded from the previous one (lcode, lsub,
 excode). The final time <option> carries data-pcode, which is what the order
-URL keys on. That is several hundred requests for a full week, so this scraper
-sleeps politely and is the slowest of the five.
+URL keys on.
+
+Measured cost of a full run: ~575 requests over about five minutes, roughly two
+a second -- 71 movie-slots across the 7 branches, ~6 in-window dates each, plus
+a 0.25s pause after every call. Slowest of the five by a wide margin, which is
+why it runs on its own interval and why its screenings are validated by the
+next full scrape rather than by a short timer.
 """
 
 import re
@@ -58,6 +63,12 @@ class LevScraper(CinemaScraper):
     def __init__(self, session=None):
         super().__init__(session)
         self._html = None
+        # sync_chain calls get_theaters(), get_movies() and get_showtimes() in
+        # turn, and the latter two each call get_theaters() again -- so /contact/
+        # was fetched three times a run, and the per-branch movie list twice.
+        # Caching both is free: nothing here changes within one run.
+        self._address_map = None
+        self._movies_by_site: dict[str, list[dict]] = {}
 
     # ---- plumbing -------------------------------------------------------
 
@@ -119,7 +130,13 @@ class LevScraper(CinemaScraper):
         ]
 
     def _addresses(self) -> dict[str, str]:
-        """Branch name -> street address, scraped from /contact/."""
+        """Branch name -> street address, scraped from /contact/. Cached."""
+        if self._address_map is not None:
+            return self._address_map
+        self._address_map = self._fetch_addresses()
+        return self._address_map
+
+    def _fetch_addresses(self) -> dict[str, str]:
         try:
             response = self.session.get(CONTACT_URL, timeout=30)
             response.raise_for_status()
@@ -149,14 +166,36 @@ class LevScraper(CinemaScraper):
             if opt.get("value") and opt.get("value").strip()
         ]
 
+    def _movies_at(self, site: str) -> list[dict]:
+        """The <option> rows for one branch, fetched once per run."""
+        if site not in self._movies_by_site:
+            self._movies_by_site[site] = self._options(self._ajax("get_movies", site))
+        return self._movies_by_site[site]
+
     def get_movies(self) -> list[MovieListing]:
         listings: dict[str, MovieListing] = {}
         for theater in self.get_theaters():
-            for opt in self._options(self._ajax("get_movies", theater.source_theatre_id)):
+            for opt in self._movies_at(theater.source_theatre_id):
                 listings.setdefault(
                     opt["value"], MovieListing(source_movie_id=opt["value"], title=opt["text"])
                 )
         return list(listings.values())
+
+    def validation_showtimes(self, days: int, movie_ids=None) -> list[Showtime] | None:
+        """Not possible cheaply, so this deliberately returns None.
+
+        Reaching a single screening's time slot needs the whole cascade: the
+        get_times call is keyed on lcode/lsub/excode, and those only exist as
+        data-* attributes threaded out of the get_types and get_dates responses
+        for that exact movie. There is no endpoint that answers "is pcode X
+        still on sale", and none of that context is stored on the screening row.
+
+        So validating one Lev showing costs three requests, and validating a
+        day's worth costs most of a full scrape. Lev relies on its (now 6-hourly)
+        full scrape instead; the validator skips it, leaving is_available NULL,
+        which displays.
+        """
+        return None
 
     def get_showtimes(self, days: int = 9) -> list[Showtime]:
         today = localtime.today()
@@ -166,7 +205,7 @@ class LevScraper(CinemaScraper):
         for theater in self.get_theaters():
             site = theater.source_theatre_id
 
-            for movie in self._options(self._ajax("get_movies", site)):
+            for movie in self._movies_at(site):
                 movie_id = movie["value"]
 
                 # get_types hands back the lcode/lsub pair every later step needs.

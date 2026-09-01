@@ -215,6 +215,26 @@ class PlanetScraper(CinemaScraper):
                             dubbed_language=dubbed,
                             original_language=None if dubbed else original,
                             subtitled_language=subtitles,
+                            # The one chain that says whether a screening is
+                            # full. Recorded on the full scrape too, not just on
+                            # validation, so the state is never older than the
+                            # last time we looked at all.
+                            sold_out=event.get("soldOut"),
                         )
                     )
         return showtimes
+
+    def validation_showtimes(self, days: int, movie_ids=None) -> list[Showtime] | None:
+        """Already scoped by date, so a short window really is a small fetch.
+
+        get_showtimes asks for dates/in-cinema/{id}/until/{date} and then one
+        film-events call per date inside the window. A one-day window is
+        therefore about a dozen requests, not the ~60 a full nine-day run costs.
+
+        Planet is also the only chain that reports soldOut, so validation here
+        catches a screening that is still listed but full -- something existence
+        checking alone cannot see. It cannot run on the production server
+        though: Planet firewalls this datacenter's IP outright, so this is
+        driven from push_local.py like the full scrape.
+        """
+        return self.get_showtimes(days=days)

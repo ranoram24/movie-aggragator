@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from sqlalchemy import Boolean, Column, Integer, String, Float, ForeignKey
 from database import Base
 
 class Movie(Base):
@@ -48,6 +48,12 @@ class SourceMovieListing(Base):
     # Movie record so we can still show something for listings TMDb can't match
     # (opera broadcasts, concerts, live stage shows).
     poster_url = Column(String, nullable=True)
+
+    # Perceptual hash of the poster, and the cluster of listings sharing it.
+    # The chains spell and word titles differently but publish the same
+    # artwork, so this is the only identity they all agree on. See posters.py.
+    poster_hash = Column(String, nullable=True)
+    poster_group = Column(String, nullable=True)
     genre = Column(String, nullable=True)
     runtime_minutes = Column(Integer, nullable=True)
     premiere_date = Column(String, nullable=True)
@@ -72,4 +78,15 @@ class Screening(Base):
     subtitled_language = Column(String, nullable=True)
 
     ticket_url = Column(String, nullable=True)  # deep link straight to this showtime's checkout
-    last_verified_at = Column(String, nullable=True)
+    last_verified_at = Column(String, nullable=True)   # last seen by a FULL scrape
+
+    # Whether a ticket can still be bought for this screening. Deliberately
+    # tri-state:
+    #   True  -- the chain still lists it, or it has never been questioned
+    #   False -- the chain has stopped listing it, or says it is sold out
+    #   NULL  -- never validated (a chain we cannot poll cheaply, e.g. Lev)
+    #
+    # NULL and True both display. Only an explicit False hides a screening, so a
+    # chain the validator cannot reach never silently empties out.
+    is_available = Column(Boolean, nullable=True, default=True)
+    last_validated_at = Column(String, nullable=True)   # last checked by validate.py

@@ -10,6 +10,7 @@ onto a title, and split a multi-language title into its parts.
 """
 
 import re
+from difflib import SequenceMatcher
 
 
 # Language/format markers that trail a title. The separator varies by chain:
@@ -126,3 +127,42 @@ def fold_for_compare(text: str | None) -> str:
     if not text:
         return ""
     return re.sub(r"\s*\.+\s*$", "", text.strip()).lower()
+
+
+# Hebrew spells transliterated names more than one way, and the chains disagree.
+# The same film arrives as "אדיוטים" from one and "אידיוטים" from another; as
+# "כוכבי כלב" and "כוכבי הכלב"; as "מרסופילמי" and "מרסופילאמי". The differences
+# are a single optional vowel letter or the definite article -- invisible to a
+# reader, fatal to an exact-match lookup.
+#
+# This matters because TMDb's search finds NOTHING for the variant spelling: it
+# is not a weak match that could be rescued by lowering a threshold, it is an
+# empty result set. So a listing spelled the unusual way stays unmatched and
+# becomes a second card for a film that already has one.
+#
+# difflib rather than rapidfuzz on purpose -- this module stays free of
+# third-party imports so the API server can use it without the matching stack.
+
+
+def near_identical(a: str | None, b: str | None,
+                   threshold: float = 0.88, min_len: int = 6) -> bool:
+    """Whether two titles are the same title, allowing for spelling drift.
+
+    The guards are what keep this from merging genuinely different films:
+
+    * min_len -- short titles collide too easily. "מואנה" and "מונה" differ by
+      one character out of five and score 0.89, which would otherwise pass.
+    * digits must match exactly, so "מואנה" never merges with "מואנה 2" and
+      "צעצוע של סיפור" never merges with "צעצוע של סיפור 5". Sequels are the
+      obvious way a near-identical title means a genuinely different film.
+    """
+    a, b = fold_for_compare(a), fold_for_compare(b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if min(len(a), len(b)) < min_len:
+        return False
+    if set(re.findall(r"\d", a)) != set(re.findall(r"\d", b)):
+        return False
+    return SequenceMatcher(None, a, b).ratio() >= threshold

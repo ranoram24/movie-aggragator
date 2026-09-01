@@ -171,11 +171,32 @@ class HotCinemaScraper(CinemaScraper):
         return latitude, longitude, address
 
     def get_showtimes(self, days: int = 9) -> list[Showtime]:
+        return self._showtimes_for(self._movie_rows(), days)
+
+    def validation_showtimes(self, days: int, movie_ids=None) -> list[Showtime] | None:
+        """Same walk, narrowed to the films we actually need to re-check.
+
+        This chain costs one request per film -- /tickets/movieevents is keyed
+        on movieid and there is no bulk equivalent -- so a full pass is ~90
+        requests. Restricting to the titles that have a screening inside the
+        validation horizon brings a pass down to roughly thirty, which is why
+        the caller bothers to pass movie_ids at all.
+
+        The movie list itself is one cached request, so the floor is cheap.
+        """
+        rows = self._movie_rows()
+        if movie_ids is not None:
+            rows = [m for m in rows if str(m["MovieId"]) in movie_ids]
+        return self._showtimes_for(rows, days)
+
+    def _showtimes_for(self, movie_rows: list[dict], days: int) -> list[Showtime]:
+        """Shared body. Identical to what get_showtimes always did, except that
+        the set of films to walk is now passed in rather than fetched here."""
         today = localtime.today()
         cutoff = today + timedelta(days=days)
 
         showtimes = []
-        for movie in self._movie_rows():
+        for movie in movie_rows:
             movie_id = str(movie["MovieId"])
             for group in self._events_for(movie_id):
                 for slot in group.get("Dates", []):

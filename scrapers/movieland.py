@@ -132,6 +132,15 @@ class MovielandScraper(CinemaScraper):
         from urllib.parse import quote
         return f"{BASE}/cache/w_295,h_425,mode_crop/{quote(pic)}"
 
+    def validation_showtimes(self, days: int, movie_ids=None) -> list[Showtime] | None:
+        """One request for the entire chain -- /api/Events returns everything.
+
+        Cannot run on the production server: Movieland answers this datacenter's
+        IP with a Cloudflare challenge that never resolves. It runs from
+        push_local.py on a machine the site accepts, same as the full scrape.
+        """
+        return self.get_showtimes(days=days)
+
     def get_showtimes(self, days: int = 9) -> list[Showtime]:
         today = localtime.today()
         cutoff = today + timedelta(days=days)

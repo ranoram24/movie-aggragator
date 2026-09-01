@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 import auth
 import localtime
+import validate
 import ticket_urls
 from database import SessionLocal
 from scrapers import SCRAPERS
@@ -48,6 +49,9 @@ class MovieIn(BaseModel):
     runtime_minutes: int | None = None
     premiere_date: str | None = None
     age_rating: str | None = None
+    # Computed by the pusher: this host cannot reach Movieland's or Planet's
+    # image servers, so it could never hash these posters itself.
+    poster_hash: str | None = None
 
 
 class ShowtimeIn(BaseModel):
@@ -59,12 +63,20 @@ class ShowtimeIn(BaseModel):
     dubbed_language: str | None = None
     original_language: str | None = None
     subtitled_language: str | None = None
+    # Planet only. Carried through the push so the server learns a screening is
+    # full even though it can never ask Planet itself.
+    sold_out: bool | None = None
 
 
 class IngestPayload(BaseModel):
     theatres: list[TheaterIn]
     movies: list[MovieIn]
     showtimes: list[ShowtimeIn]
+    # How many days ahead this payload covers. Needed to retire screenings
+    # safely: anything stored inside this window and absent from the payload is
+    # gone, but rows beyond it were simply never sent and must not be judged.
+    # Older senders omit it, in which case nothing is retired.
+    window_days: int | None = None
 
 
 class IngestResult(BaseModel):
@@ -74,6 +86,8 @@ class IngestResult(BaseModel):
     new_screenings: int
     skipped_unknown: int
     rejected_urls: int
+    retired: int
+    restored: int
     received_at: str
 
 
@@ -104,6 +118,18 @@ def _finish_ingest() -> None:
     except Exception as exc:
         # Not fatal: the next scheduled sync geocodes whatever is still missing.
         log.warning("post-ingest geocoding skipped: %s: %s", type(exc).__name__, exc)
+
+    try:
+        import posters
+
+        stats = posters.run()
+        if stats.get("adopted"):
+            log.info("posters: %s pushed listing(s) joined an existing film",
+                     stats["adopted"])
+    except Exception as exc:
+        # The push already stored everything; grouping is an improvement on top.
+        log.warning("post-ingest poster grouping skipped: %s: %s",
+                    type(exc).__name__, exc)
 
     try:
         from match_movies import match_unmatched
@@ -186,9 +212,29 @@ def ingest(
                 new_count += 1
         db.commit()
 
-        log.info("ingested %s: %s theatres, %s listings, %s new screenings%s",
+        # Retire whatever the push did not carry. This is the only route by
+        # which Movieland and Planet get their stale screenings cleared: the
+        # server cannot fetch either chain, so the pushed payload is the only
+        # statement of what is still on sale that it will ever see.
+        retired = restored = 0
+        if payload.window_days:
+            try:
+                live = [Showtime(**item.model_dump()) for item in payload.showtimes]
+                outcome = validate.retire_from_payload(
+                    db, source, live, payload.window_days
+                )
+                retired, restored = outcome["marked"], outcome["revived"]
+            except Exception as exc:
+                # Never fail the push over this -- the data itself is already
+                # stored, and leaving screenings visible is the safe direction.
+                db.rollback()
+                log.warning("post-ingest retirement skipped for %s: %s: %s",
+                            chain, type(exc).__name__, exc)
+
+        log.info("ingested %s: %s theatres, %s listings, %s new screenings%s%s",
                  chain, len(theatres), len(listings), new_count,
-                 f", {rejected} REFUSED for bad ticket_url" if rejected else "")
+                 f", {rejected} REFUSED for bad ticket_url" if rejected else "",
+                 f", {retired} retired" if retired else "")
 
         background.add_task(_finish_ingest)
 
@@ -199,6 +245,8 @@ def ingest(
             new_screenings=new_count,
             skipped_unknown=skipped,
             rejected_urls=rejected,
+            retired=retired,
+            restored=restored,
             received_at=localtime.now().isoformat(timespec="seconds"),
         )
     except Exception:

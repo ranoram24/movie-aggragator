@@ -22,9 +22,11 @@ Needs two settings, from the environment or .env:
 """
 
 import argparse
+import json
 import os
 import sys
 from dataclasses import asdict
+from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
@@ -44,13 +46,94 @@ INGEST_TOKEN = os.getenv("INGEST_TOKEN", "")
 REQUEST_TIMEOUT = 180
 
 
+# Poster URLs are stable for the life of a film, and the hash of one cannot
+# change without the URL changing, so a fingerprint only ever has to be
+# computed once. Without this cache every push re-downloaded all ~108 posters:
+# harmless at six-hourly, but the task now runs every two hours, which would be
+# some 1,300 fetches a day from the two chains we are most careful with.
+HASH_CACHE = Path(__file__).with_name("poster_hash_cache.json")
+
+
+def _load_cache() -> dict:
+    try:
+        return json.loads(HASH_CACHE.read_text(encoding="utf-8"))
+    except Exception:
+        # Missing or corrupt: start over. Costs one pass of downloads, which is
+        # the behaviour before the cache existed, so it fails safe.
+        return {}
+
+
+def _save_cache(cache: dict) -> None:
+    try:
+        HASH_CACHE.write_text(json.dumps(cache), encoding="utf-8")
+    except Exception as exc:
+        print(f"  (could not write poster cache: {type(exc).__name__}: {exc})")
+
+
+def add_poster_hashes(movies: list[dict]) -> int:
+    """Fingerprint each poster before sending.
+
+    The server groups films across chains by their artwork, which is the only
+    identity the five chains agree on -- they spell and word titles differently
+    enough that title matching alone leaves duplicate cards. But it cannot do
+    that for these two chains: their image servers sit behind the same
+    Cloudflare block that stops it scraping them at all, so every poster fetch
+    from there fails and the listings never join a group.
+
+    This machine can reach them, so it does the fetching. Best effort -- a
+    poster that will not download simply goes without, and that listing falls
+    back to title grouping exactly as before.
+    """
+    import posters
+    import requests
+
+    cache = _load_cache()
+    session = None
+    downloaded = 0
+
+    for movie in movies:
+        url = movie.get("poster_url")
+        if not url or movie.get("poster_hash"):
+            continue
+
+        cached = cache.get(url)
+        if cached:
+            movie["poster_hash"] = cached
+            continue
+
+        if session is None:
+            session = requests.Session()
+            session.headers["User-Agent"] = posters.USER_AGENT
+        try:
+            response = session.get(url, timeout=posters.REQUEST_TIMEOUT)
+            response.raise_for_status()
+            value = posters.dhash(response.content)
+        except Exception:
+            # A poster that will not fetch or decode costs this listing its
+            # grouping, nothing more. Not cached, so the next run retries it.
+            continue
+        movie["poster_hash"] = value
+        cache[url] = value
+        downloaded += 1
+
+    if downloaded:
+        _save_cache(cache)
+    return downloaded
+
+
 def collect(chain: str, days: int) -> dict:
     """Run one chain's scraper and shape the result for the ingest endpoint."""
     scraper = SCRAPERS[chain]()
+    movies = [asdict(m) for m in scraper.get_movies()]
+    add_poster_hashes(movies)
     return {
         "theatres": [asdict(t) for t in scraper.get_theaters()],
-        "movies": [asdict(m) for m in scraper.get_movies()],
+        "movies": movies,
         "showtimes": [asdict(s) for s in scraper.get_showtimes(days=days)],
+        # Tells the server how far ahead this payload is authoritative, so it
+        # can retire screenings that vanished without touching rows beyond the
+        # window we actually scraped.
+        "window_days": days,
     }
 
 
@@ -102,9 +185,11 @@ def main() -> int:
             print(f"  scrape FAILED: {type(exc).__name__}: {exc}")
             continue
 
-        counts = {k: len(v) for k, v in payload.items()}
+        # Only the record lists -- payload also carries window_days, an int.
+        counts = {k: len(v) for k, v in payload.items() if isinstance(v, list)}
+        hashed = sum(1 for m in payload["movies"] if m.get("poster_hash"))
         print(f"  scraped {counts['theatres']} theatres, {counts['movies']} movies, "
-              f"{counts['showtimes']} showtimes")
+              f"{counts['showtimes']} showtimes, {hashed} poster hashes")
 
         if not payload["showtimes"]:
             # Sending nothing is harmless but almost always means a broken
@@ -120,7 +205,11 @@ def main() -> int:
             result = push(chain, payload)
             print(f"  pushed -> {result['new_screenings']} new screenings"
                   + (f", {result['skipped_unknown']} unresolvable"
-                     if result["skipped_unknown"] else ""))
+                     if result["skipped_unknown"] else "")
+                  + (f", {result['retired']} retired"
+                     if result.get("retired") else "")
+                  + (f", {result['restored']} restored"
+                     if result.get("restored") else ""))
             # The server pins each chain's checkout host and drops anything
             # else. A non-zero count here means either the chain moved its
             # booking domain or something rewrote the links in transit --

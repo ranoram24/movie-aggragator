@@ -77,7 +77,8 @@ def upsert_listing(db, cinema_source_id: int, movie) -> SourceMovieListing:
     row.raw_title = movie.title
     # Refreshed every run, but never overwrite a real value with a null -- some
     # chains expose metadata on only one of their endpoints.
-    for field in ("poster_url", "genre", "runtime_minutes", "premiere_date", "age_rating"):
+    for field in ("poster_url", "genre", "runtime_minutes", "premiere_date",
+                  "age_rating", "poster_hash"):
         value = getattr(movie, field)
         if value is not None:
             setattr(row, field, value)
@@ -117,19 +118,50 @@ def upsert_screening(db, listing_id: int, theatre_id: int, showtime) -> bool:
     row.subtitled_language = showtime.subtitled_language
     row.ticket_url = showtime.ticket_url
     row.last_verified_at = localtime.now().isoformat()
+
+    # Seeing a screening in a scrape is itself evidence it is still on sale, so
+    # a full scrape clears a previous retirement. Planet is the only chain that
+    # can say more than "it exists"; where sold_out is None the screening's
+    # presence in the response is the answer.
+    row.is_available = not showtime.sold_out
     return is_new
 
 
-def sync_chain(db, key: str, days: int) -> dict:
-    scraper = SCRAPERS[key]()
-    source = get_or_create_cinema_source(db, key, scraper.source_name)
+def fetch_chain(key: str, days: int) -> dict:
+    """Everything one chain has to say, over the network. Touches no database.
 
-    theaters = scraper.get_theaters()
-    theatres = {t.source_theatre_id: upsert_theatre(db, source.id, t) for t in theaters}
+    Split from the writing half so the scheduler can hold its SQLite write lock
+    for the seconds the inserts take rather than the minutes the fetching does.
+    Lev spends about three and a half minutes here; blocking every other writer
+    for that long is what delayed validation passes behind a running scrape.
+
+    All three calls share one scraper instance, so the internal caches (the
+    /movies page, the bulk events blob, the movie-id map) work exactly as they
+    did when this was one function.
+    """
+    scraper = SCRAPERS[key]()
+    return {
+        "source_name": scraper.source_name,
+        "theaters": scraper.get_theaters(),
+        "movies": scraper.get_movies(),
+        "showtimes": scraper.get_showtimes(days=days),
+    }
+
+
+def store_chain(db, key: str, fetched: dict) -> dict:
+    """Write one chain's fetched records. Makes no network calls."""
+    source = get_or_create_cinema_source(db, key, fetched["source_name"])
+
+    theatres = {
+        t.source_theatre_id: upsert_theatre(db, source.id, t)
+        for t in fetched["theaters"]
+    }
     db.commit()
 
-    movies = scraper.get_movies()
-    listings = {m.source_movie_id: upsert_listing(db, source.id, m) for m in movies}
+    listings = {
+        m.source_movie_id: upsert_listing(db, source.id, m)
+        for m in fetched["movies"]
+    }
     db.commit()
 
     new_count = 0
@@ -142,7 +174,7 @@ def sync_chain(db, key: str, days: int) -> dict:
     # Tracking the keys here is cheaper than flushing on every row.
     seen: set[tuple[int, int, str, str, str | None]] = set()
 
-    for showtime in scraper.get_showtimes(days=days):
+    for showtime in fetched["showtimes"]:
         theatre = theatres.get(showtime.source_theatre_id)
         listing = listings.get(showtime.source_movie_id)
         if theatre is None or listing is None:
@@ -183,6 +215,16 @@ def sync_chain(db, key: str, days: int) -> dict:
         "duplicates": duplicates,
         "rejected_urls": rejected_urls,
     }
+
+
+def sync_chain(db, key: str, days: int) -> dict:
+    """Fetch one chain and store it. What this module has always done.
+
+    Kept because the command line and any one-off script want the simple thing.
+    The scheduler calls the two halves separately so it can hold its write lock
+    across the storing only -- see fetch_chain.
+    """
+    return store_chain(db, key, fetch_chain(key, days))
 
 
 def main() -> int:

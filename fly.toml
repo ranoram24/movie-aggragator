@@ -26,6 +26,21 @@ primary_region = "cdg"   # Paris — closest Fly region to Israel for latency
   # so covering that last Wednesday takes 9. At 7 the tail of a fresh schedule
   # sat outside the window until a later run caught up.
   SCRAPE_DAYS = "9"
+
+  # Layer 1 -- discovery. Finds new films, theatres and showtimes.
+  SCRAPE_INTERVAL_DEFAULT = "7200"        # 2h
+  # Lev is the expensive one: ~575 requests, ~5 min, measured. Six hours is
+  # ~2,300 requests a day in four short bursts, and Lev cannot be validated
+  # cheaply, so this scrape is the only thing keeping it current.
+  SCRAPE_INTERVAL_LEV = "21600"           # 6h
+
+  # Layer 2 -- retirement. Re-checks screenings already stored and close enough
+  # to matter, and marks the ones the chain has stopped selling. Cinema City is
+  # one bulk call for the whole chain; Hot Cinema costs a request per film, so
+  # it runs less often.
+  VALIDATION_INTERVAL_DEFAULT = "900"     # 15m
+  VALIDATION_INTERVAL_HOT_CINEMA = "3600" # 1h
+  VALIDATION_HORIZON_HOURS = "24"
   # Movieland and Planet block this datacenter's IP through Cloudflare -- a
   # challenge that never resolves and an outright firewall block respectively.
   # Verified against cloudscraper, TLS fingerprint impersonation and a real

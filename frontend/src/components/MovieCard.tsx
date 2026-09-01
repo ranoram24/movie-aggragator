@@ -35,6 +35,13 @@ export function MovieCard({ movie }: Props) {
               invited comparison with Maps without adding much. Proximity still
               decides the ordering -- it just is not spelled out. */}
           <p className="movie-card__cinemas">{movie.theatre_count} בתי קולנוע</p>
+          {/* Only when another card looks like the same film. Naming the
+              chains on both is what lets you see at a glance that one film has
+              been split -- the two cards will cover different chains. Hidden
+              otherwise, since on a correctly merged card it is just noise. */}
+          {movie.possible_duplicate && movie.chains.length > 0 && (
+            <p className="movie-card__chains">{movie.chains.join(' · ')}</p>
+          )}
         </div>
       </div>
     </Link>

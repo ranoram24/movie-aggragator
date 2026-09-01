@@ -57,6 +57,12 @@ class MovieListing:
     premiere_date: Optional[str] = None
     age_rating: Optional[str] = None
 
+    # Perceptual hash of the poster. Normally left None and computed on the
+    # server, but Movieland and Planet firewall the production host, so their
+    # posters are unreachable there and push_local.py fills this in from a
+    # machine that can fetch them. See posters.py.
+    poster_hash: Optional[str] = None
+
 
 @dataclass
 class Showtime:
@@ -72,6 +78,12 @@ class Showtime:
     dubbed_language: Optional[str] = None
     original_language: Optional[str] = None
     subtitled_language: Optional[str] = None
+
+    # True when the chain says this screening is full. Only Planet reports it;
+    # everywhere else it stays None, which means "not stated", NOT "available".
+    # A seat COUNT is deliberately not carried: the only question that matters
+    # is whether a ticket can still be bought at all.
+    sold_out: Optional[bool] = None
 
     @property
     def spoken_language(self) -> Optional[str]:
@@ -197,6 +209,26 @@ class CinemaScraper(ABC):
     @abstractmethod
     def get_showtimes(self, days: int = 9) -> list[Showtime]:
         """Every showtime in the next `days` days, across all theaters."""
+
+    def validation_showtimes(
+        self, days: int, movie_ids: Optional[set[str]] = None
+    ) -> Optional[list[Showtime]]:
+        """A cheap re-fetch of just the near-term schedule, for validation.
+
+        Separate from get_showtimes() because the two have different budgets.
+        get_showtimes() runs every couple of hours and may cost hundreds of
+        requests; this runs every few minutes and must cost a handful.
+
+        Returning None means "this chain cannot be re-fetched cheaply enough to
+        poll" -- the validator then leaves its screenings alone rather than
+        guessing they are gone. That is the safe default, so the base class
+        returns None and each chain opts in.
+
+        `movie_ids` lets the caller narrow the work to titles that actually have
+        near-term screenings stored. Chains whose feed is a single bulk call can
+        ignore it; Hot Cinema, which costs one request per film, uses it.
+        """
+        return None
 
     def get_movies_at_theater(self, source_theatre_id: str, days: int = 9) -> list[MovieListing]:
         """Convenience view: which titles play at one theater.

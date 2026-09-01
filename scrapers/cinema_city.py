@@ -198,6 +198,18 @@ class CinemaCityScraper(CinemaScraper):
         from urllib.parse import quote
         return POSTER_URL.format(filename=quote(pic))
 
+    def validation_showtimes(self, days: int, movie_ids=None) -> list[Showtime] | None:
+        """Cheap here: the whole chain is one unparameterised call.
+
+        /tickets/Events returns every showing regardless of window -- the date
+        filter is applied locally -- so re-fetching a 1-day window costs exactly
+        what a 9-day one does. About nine requests all in, counting the movie-id
+        map, which is well inside a per-quarter-hour budget.
+
+        movie_ids is ignored: there is nothing to narrow.
+        """
+        return self.get_showtimes(days=days)
+
     def get_showtimes(self, days: int = 9) -> list[Showtime]:
         # No parameters at all -> every movie, every theater, every date.
         groups = self._bulk_events()

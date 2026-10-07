@@ -52,6 +52,7 @@ class MovieIn(BaseModel):
     # Computed by the pusher: this host cannot reach Movieland's or Planet's
     # image servers, so it could never hash these posters itself.
     poster_hash: str | None = None
+    synopsis: str | None = None
 
 
 class ShowtimeIn(BaseModel):

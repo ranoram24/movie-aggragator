@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, Float, ForeignKey
+from sqlalchemy import Boolean, Column, Index, Integer, String, Float, ForeignKey
 from database import Base
 
 class Movie(Base):
@@ -54,6 +54,9 @@ class SourceMovieListing(Base):
     # artwork, so this is the only identity they all agree on. See posters.py.
     poster_hash = Column(String, nullable=True)
     poster_group = Column(String, nullable=True)
+
+    # Plot description as the chain publishes it, used when TMDb has none.
+    synopsis = Column(String, nullable=True)
     genre = Column(String, nullable=True)
     runtime_minutes = Column(Integer, nullable=True)
     premiere_date = Column(String, nullable=True)
@@ -61,6 +64,22 @@ class SourceMovieListing(Base):
 
 class Screening(Base):
     __tablename__ = "screenings"
+
+    # Without these the table has only its primary key, and it is by far the
+    # biggest: 84k rows, of which 87% are in the past and no query ever wants.
+    #
+    # Every API request filters on showtime, and every upsert during a scrape
+    # looks a row up by the identity triple below. Unindexed, both were full
+    # scans -- so a scrape storing 3,300 screenings scanned 84,000 rows 3,300
+    # times, which is what kept a one-CPU machine busy and made the site slow
+    # for everyone else while it ran.
+    __table_args__ = (
+        Index("ix_screenings_showtime", "showtime"),
+        Index(
+            "ix_screenings_identity",
+            "source_movie_listing_id", "theatre_id", "showtime",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     source_movie_listing_id = Column(Integer, ForeignKey("source_movie_listings.id"))

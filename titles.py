@@ -165,4 +165,25 @@ def near_identical(a: str | None, b: str | None,
         return False
     if set(re.findall(r"\d", a)) != set(re.findall(r"\d", b)):
         return False
-    return SequenceMatcher(None, a, b).ratio() >= threshold
+
+    # ratio() walks the strings and is the expensive part -- about a
+    # millisecond a call, which the API felt sharply once it was comparing
+    # every pair of cards on every request. real_quick_ratio and quick_ratio
+    # are cheap UPPER BOUNDS on it, so a pair they already put below the
+    # threshold cannot reach it and is dropped without the real comparison.
+    # Exact, not approximate: nothing that would have matched stops matching.
+    matcher = SequenceMatcher(None, a, b)
+    if matcher.real_quick_ratio() < threshold or matcher.quick_ratio() < threshold:
+        return False
+    return matcher.ratio() >= threshold
+
+
+def title_slug(title: str | None) -> str:
+    """A stable key from a title, once chain decoration is stripped off.
+
+    Lives here rather than in the API layer because the poster grouper needs it
+    too: two chains listing one film under the same title must land in the same
+    group even when only one of them publishes artwork.
+    """
+    cleaned = normalize_title(title or "").lower()
+    return re.sub(r"[^\w֐-׿Ѐ-ӿ؀-ۿ]+", "-", cleaned).strip("-")

@@ -1,103 +1,64 @@
 """Cinema City.
 
-Two sources make up one chain. The /movies page is server-rendered HTML and is
-the only place the metadata lives -- genre, runtime, premiere date, age rating,
-posters -- alongside a `theatersAll([...])` JavaScript call carrying the theatre
-list. Everything else comes from /tickets/*, a JSON API.
+Rewritten in October 2026, when the chain replaced its site. The old one was an
+ASP.NET app that served HTML plus a /tickets/* JSON API; everything this scraper
+used is gone:
 
-Showtimes come from ONE unparameterised call. /tickets/Events with no query
-string at all returns every showtime at every theatre; the obvious loop over
-theatre x movie x date is about a thousand requests for the same data.
+    /movies            -> 301 to a Wix page, no theatersAll([...]) blob
+    /tickets/Events    -> 404
+    /tickets/movies    -> 404
 
-The catch is that the bulk response drops MovieId, carrying only Name and
-ExportCode, while SourceMovieListing keys on MovieId. So get_movies() unions
-MoviesByTheaterAndVenueType across the 8 physical theatres to rebuild a
-Name -> MovieId map, and showtimes join back on Name. Verified 50/50 exact,
-zero unmatched.
+The marketing site is now Wix, which renders its film grid from a Wix
+collection and exposes no usable data endpoint. Scraping it would mean driving a
+headless browser through a JavaScript repeater.
 
-Note the endpoints disagree about spelling: /tickets/Events takes `TheatreId`
-(British), the others take `theaterId` (American). Model binding is
-case-insensitive but silently ignores names it does not recognise, so the wrong
-spelling returns 200 with unfiltered data rather than an error. Only a hazard
-if you go back to per-theatre calls -- the bulk call passes nothing at all.
+The ticketing system is the better source and is a separate application --
+tickets.cinema-city.co.il, a Nuxt app with a plain REST API behind it. Two calls
+cover the whole chain:
+
+    /api/features        every film, with real metadata
+    /api/presentations   every screening at every cinema, ~3,600 rows
+
+"Presentation" is their word for a screening, and its id is what the order URL
+takes, so the ticket link is built straight from it.
+
+This is a better source than what it replaces. The old site had no per-screening
+language field at all -- the dub had to be inferred from a "-מדובב" suffix on the
+title -- and no venue types. The API states both outright, along with a
+synopsis, an English title and a sold-out flag.
+
+Two ids are deliberately kept from the old system so nothing is orphaned:
+venueLocationId is the same value the old TixTheatreId had (1170, 1173, ...),
+and featureId occupies the same space as the old MovieId. Stored theatres keep
+their geocoded positions and stored listings keep their TMDb matches.
 """
 
-import json
 import re
 from datetime import datetime, timedelta
 
-from bs4 import BeautifulSoup
-
 import localtime
-from .base import (
-    CinemaScraper, Theater, MovieListing, Showtime,
-    clean_address, language_from_title,
-)
+from .base import CinemaScraper, Theater, MovieListing, Showtime
 
-BASE = "https://www.cinema-city.co.il"
+API = "https://tickets.cinema-city.co.il/api"
 
-# One row per physical building. theatersAll also contains VIP/ONYX/Prime/Lounge
-# sub-variants of the same buildings, which would duplicate theaters.
-PHYSICAL_THEATER_IDS = [1, 2, 3, 4, 5, 13, 17, 25]
+TICKET_URL = "https://tickets.cinema-city.co.il/order/{presentation_id}"
 
-TICKET_URL = "https://tickets.cinema-city.co.il/order/{event_id}"
+# venueTypeId, as seen across a full feed. Anything unrecognised is treated as
+# an ordinary hall rather than invented, since venue_type is part of a
+# screening's identity and a wrong value would split one showing into two.
+VENUE_TYPES = {1: "regular", 4: "Prime", 30: "VIP"}
 
-# The /movies page only lists actual films, so live events and one-off
-# screenings arrive with no poster from there. The bulk Events feed does carry
-# a Pic filename for them, which resolves under the site's own /images/.
-# Use the https host, not the raw 80.178.x one it also serves from -- a plain
-# http image would be blocked as mixed content on an https page.
-POSTER_URL = "https://www.cinema-city.co.il/images/{filename}"
+_TAGS = re.compile(r"<[^>]+>")
 
 
-def extract_theaters(html: str) -> list[dict]:
-    """The theatre list, out of the theatersAll([...]) call in the page source."""
-    match = re.search(r"theatersAll\((\[.*?\])\);", html, re.DOTALL)
-    if not match:
-        raise ValueError("Could not find theatersAll JSON in page")
-    return json.loads(match.group(1))
-
-
-def extract_movies(html: str) -> list[dict]:
-    """Film metadata from the poster cards on the /movies page."""
-    soup = BeautifulSoup(html, "html.parser")
-
-    movies = []
-    for block in soup.find_all("div", class_="movie-thumb"):
-        link = block.get("data-linkmobile", "")
-        movie_id = link.split("/")[-1] if link else None
-
-        title_tag = block.find("h2")
-        img_tag = block.find("img", class_="flip-thumb")
-
-        # Metadata lives inside <p class="flip-link"> tags on the back panel,
-        # each shaped like: <p class="flip-link">סיווג <span>קומדיה</span></p>
-        genre = runtime = premiere_date = age_rating = None
-        for p in block.find_all("p", class_="flip-link"):
-            label = p.get_text(strip=True)
-            span = p.find("span")
-            value = span.get_text(strip=True) if span else None
-
-            if "סיווג" in label:
-                genre = value
-            elif "אורך בדקות" in label:
-                runtime = value
-            elif "תאריך בכורה" in label:
-                premiere_date = value
-            elif "הגבלת צפיה" in label:
-                age_rating = value
-
-        movies.append({
-            "movie_id": movie_id,
-            "title": title_tag.get_text(strip=True) if title_tag else None,
-            "poster_url": img_tag.get("src") if img_tag else None,
-            "genre": genre,
-            "runtime": runtime,
-            "premiere_date": premiere_date,
-            "age_rating": age_rating,
-        })
-
-    return movies
+def _text(html: str | None) -> str | None:
+    """Flatten the API's HTML synopsis into a plain paragraph."""
+    if not html:
+        return None
+    text = _TAGS.sub(" ", html)
+    text = (text.replace("&nbsp;", " ").replace("&quot;", '"')
+                .replace("&amp;", "&").replace("&#39;", "'"))
+    return " ".join(text.split()) or None
 
 
 class CinemaCityScraper(CinemaScraper):
@@ -106,145 +67,128 @@ class CinemaCityScraper(CinemaScraper):
 
     def __init__(self, session=None):
         super().__init__(session)
-        self._html = None
-        self._name_to_movie_id = None
-        self._events = None
+        self._features_cache = None
+        self._presentations_cache = None
 
-    def _page(self) -> str:
-        """The /movies page, fetched once and reused.
+    # ---- the two calls --------------------------------------------------
 
-        Goes through self.session so it carries the browser User-Agent the base
-        class sets. The site does not check it today -- verified by calling
-        every endpoint from a bare session with no headers at all -- but there
-        is no reason for this one request to be the odd one out.
+    def _features(self) -> list[dict]:
+        if self._features_cache is None:
+            self._features_cache = self.get_json(f"{API}/features")
+        return self._features_cache
+
+    def _presentations(self) -> list[dict]:
+        """Every screening the chain is selling, in one request.
+
+        Cached because all three interface methods read it: the theatre list is
+        derived from it, and it is a ~5MB response.
         """
-        if self._html is None:
-            response = self.session.get(f"{BASE}/movies", timeout=30)
-            response.raise_for_status()
-            self._html = response.text
-        return self._html
+        if self._presentations_cache is None:
+            body = self.get_json(f"{API}/presentations")
+            self._presentations_cache = body.get("presentations", [])
+        return self._presentations_cache
 
-    def _physical_theaters(self) -> list[dict]:
-        by_id = {t["ID"]: t for t in extract_theaters(self._page())}
-        return [by_id[i] for i in PHYSICAL_THEATER_IDS if i in by_id]
+    # ---- interface ------------------------------------------------------
 
     def get_theaters(self) -> list[Theater]:
-        # source_theatre_id is TixTheatreId, NOT the site's own ID -- the Events
-        # endpoint speaks the ticketing system's ID space (1170...), while
-        # MoviesByTheaterAndVenueType speaks the site's (1, 2, 3...).
-        return [
-            Theater(
-                source_theatre_id=str(t["TixTheatreId"]),
-                name=t["Name"],
-                # theatersAll stores this as an HTML blob, not a plain string.
-                address=clean_address(t.get("Address")),
-            )
-            for t in self._physical_theaters()
-        ]
+        """Derived from the screenings, since the API has no cinema endpoint.
 
-    def _movie_ids_by_name(self) -> dict[str, str]:
-        if self._name_to_movie_id is None:
-            mapping: dict[str, str] = {}
-            for theater in self._physical_theaters():
-                movies = self.get_json(
-                    f"{BASE}/tickets/MoviesByTheaterAndVenueType",
-                    params={"theaterId": theater["ID"], "venueTypeId": 1},
-                )
-                for m in movies:
-                    mapping.setdefault(m["Name"], str(m["MovieId"]))
-            self._name_to_movie_id = mapping
-        return self._name_to_movie_id
-
-    def _bulk_events(self) -> list[dict]:
-        """Every showtime at every theater, in one unparameterised call.
-
-        Cached because both get_movies() (for poster fallbacks) and
-        get_showtimes() need it, and it is a ~200KB response.
+        address is left None deliberately: this feed does not carry one
+        (venueCity and venueLocation are null throughout), and upsert_theatre
+        keeps the stored value rather than overwriting it with nothing. The
+        eight addresses were captured from the old site and are already
+        geocoded, so there is nothing to re-fetch.
         """
-        if self._events is None:
-            self._events = self.get_json(f"{BASE}/tickets/Events")
-        return self._events
+        seen: dict[str, Theater] = {}
+        for row in self._presentations():
+            location_id = row.get("venueLocationId")
+            name = row.get("locationName")
+            if location_id is None or not name:
+                continue
+            seen.setdefault(
+                str(location_id),
+                # Same id the old TixTheatreId used, so existing rows match.
+                Theater(source_theatre_id=str(location_id), name=name),
+            )
+        return list(seen.values())
 
     def get_movies(self) -> list[MovieListing]:
-        # Metadata (genre/runtime/premiere/age rating) lives on the /movies page
-        # and is keyed by MovieId; the API movie list is the authoritative set of
-        # what is actually showing. Movies present in one but not the other are
-        # normal, so metadata is merged in where available and left null otherwise.
-        metadata = {m["movie_id"]: m for m in extract_movies(self._page()) if m["movie_id"]}
-        # Poster of last resort for anything absent from the /movies page.
-        pics = {g["Name"]: g.get("Pic") for g in self._bulk_events() if g.get("Pic")}
+        # /api/features lists everything the chain has on file, including films
+        # months out with nothing scheduled. Only those actually playing are
+        # returned, so the database does not fill with listings that have no
+        # screenings and would still be hashed and sent to TMDb.
+        showing = {str(p.get("featureId")) for p in self._presentations()}
 
         listings = []
-        for name, movie_id in self._movie_ids_by_name().items():
-            meta = metadata.get(movie_id, {})
-            runtime = meta.get("runtime")
+        for feature in self._features():
+            feature_id = str(feature.get("id"))
+            if feature_id not in showing:
+                continue
+            duration = feature.get("duration")
             listings.append(
                 MovieListing(
-                    source_movie_id=movie_id,
-                    title=name,
-                    poster_url=meta.get("poster_url") or self._poster(pics.get(name)),
-                    genre=meta.get("genre"),
-                    runtime_minutes=int(runtime) if runtime and str(runtime).isdigit() else None,
-                    premiere_date=meta.get("premiere_date"),
-                    age_rating=meta.get("age_rating"),
+                    source_movie_id=feature_id,
+                    title=feature.get("name") or "",
+                    poster_url=feature.get("imageData"),
+                    genre=feature.get("categoryName"),
+                    runtime_minutes=int(duration) if duration else None,
+                    premiere_date=feature.get("dateStarted"),
+                    age_rating=feature.get("ratingName"),
+                    # Arrives as HTML; 132 of 133 films have one.
+                    synopsis=_text(feature.get("synopsis")),
                 )
             )
         return listings
 
-    @staticmethod
-    def _poster(pic: str | None) -> str | None:
-        if not pic:
-            return None
-        from urllib.parse import quote
-        return POSTER_URL.format(filename=quote(pic))
-
-    def validation_showtimes(self, days: int, movie_ids=None) -> list[Showtime] | None:
-        """Cheap here: the whole chain is one unparameterised call.
-
-        /tickets/Events returns every showing regardless of window -- the date
-        filter is applied locally -- so re-fetching a 1-day window costs exactly
-        what a 9-day one does. About nine requests all in, counting the movie-id
-        map, which is well inside a per-quarter-hour budget.
-
-        movie_ids is ignored: there is nothing to narrow.
-        """
-        return self.get_showtimes(days=days)
-
     def get_showtimes(self, days: int = 9) -> list[Showtime]:
-        # No parameters at all -> every movie, every theater, every date.
-        groups = self._bulk_events()
-        name_to_id = self._movie_ids_by_name()
-
         today = localtime.today()
         cutoff = today + timedelta(days=days)
 
         showtimes = []
-        for group in groups:
-            movie_id = name_to_id.get(group["Name"])
-            if not movie_id:
-                continue  # showing somewhere we don't track as a physical theater
+        for row in self._presentations():
+            presentation_id = row.get("id")
+            feature_id = row.get("featureId")
+            location_id = row.get("venueLocationId")
+            if not presentation_id or feature_id is None or location_id is None:
+                continue
 
-            # No per-screening language field exists here: Cinema City ships the
-            # dubbed and subtitled cuts as separate movie ids whose titles carry
-            # "-מדובב" / "-אנגלית", so the title is the only signal.
-            dubbed, original = language_from_title(group["Name"])
+            try:
+                starts_at = datetime.strptime(row["dateTime"], "%Y-%m-%d %H:%M")
+            except (ValueError, KeyError, TypeError):
+                continue
+            # The feed runs months ahead for advance sales, far past the window
+            # the site shows.
+            if not (today <= starts_at.date() < cutoff):
+                continue
 
-            for slot in group.get("Dates", []):
-                try:
-                    starts_at = datetime.strptime(slot["Date"], "%d/%m/%Y %H:%M")
-                except (ValueError, KeyError):
-                    continue
-                if not (today <= starts_at.date() < cutoff):
-                    continue
+            # Stated per screening now, rather than guessed from a title
+            # suffix. dubbedLanguageISO is null when the film plays in its own
+            # language, which is exactly the distinction the cards rely on.
+            dubbed = row.get("dubbedLanguageISO")
+            spoken = row.get("languageISO")
 
-                showtimes.append(
-                    Showtime(
-                        source_theatre_id=str(slot["TheaterId"]),
-                        source_movie_id=movie_id,
-                        starts_at=starts_at.isoformat(),
-                        ticket_url=TICKET_URL.format(event_id=slot["EventId"]),
-                        dubbed_language=dubbed,
-                        original_language=original,
-                    )
+            showtimes.append(
+                Showtime(
+                    source_theatre_id=str(location_id),
+                    source_movie_id=str(feature_id),
+                    starts_at=starts_at.isoformat(),
+                    ticket_url=TICKET_URL.format(presentation_id=presentation_id),
+                    venue_type=VENUE_TYPES.get(row.get("venueTypeId"), "regular"),
+                    dubbed_language=dubbed,
+                    original_language=None if dubbed else spoken,
+                    subtitled_language=row.get("subLanguageISO"),
+                    # New here: only Planet used to report this.
+                    sold_out=bool(row.get("soldout")),
                 )
+            )
         return showtimes
+
+    def validation_showtimes(self, days: int, movie_ids=None) -> list[Showtime] | None:
+        """Cheap: the whole chain is two calls regardless of the window.
+
+        /api/presentations is unparameterised, so re-checking one day costs the
+        same as a full nine-day scrape. Well inside a per-quarter-hour budget,
+        and it now carries soldout, so validation can retire a screening that is
+        still listed but full.
+        """
+        return self.get_showtimes(days=days)

@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 
 import localtime
 from database import SessionLocal
-from titles import normalize_title
+from titles import normalize_title, title_slug
 from models import CinemaSource, Movie, Screening, SourceMovieListing, Theatre
 
 router = APIRouter(prefix="/api", tags=["movies"])
@@ -170,12 +170,6 @@ def poster_rank(listing: SourceMovieListing, chain_key: str) -> tuple:
     return (foreign, CHAIN_POSTER_ORDER.get(chain_key, 9))
 
 
-def title_slug(title: str) -> str:
-    """A stable key from a title, once chain decoration is stripped off."""
-    cleaned = normalize_title(title or "").lower()
-    return re.sub(r"[^\w֐-׿Ѐ-ӿ؀-ۿ]+", "-", cleaned).strip("-")
-
-
 def canonical_movie_ids(db: Session) -> dict[int, int]:
     """Collapse duplicate TMDb entries for the same film.
 
@@ -221,13 +215,53 @@ def film_key(listing: SourceMovieListing, canonical: dict[int, int] | None = Non
     return f"t{slug}" if slug else f"l{listing.id}"
 
 
-def _rows(db: Session):
-    """Every upcoming screening joined to its listing, theatre, chain and movie.
+def listing_ids_for_film(db: Session, film_id: str, canonical: dict) -> list[int]:
+    """Which source listings make up one card.
 
-    One query rather than per-film lookups: the whole dataset is ~13k rows and
-    both endpoints need the same join, so N+1 here would be pointless.
+    Cheap on purpose: it reads the listings table only, a few hundred rows,
+    with no join to screenings. The detail endpoint used to find its rows by
+    loading EVERY upcoming screening and filtering in Python -- eleven thousand
+    rows to serve about five hundred -- which is most of why a film page took
+    twenty seconds while a scrape was running.
+    """
+    return [
+        listing.id
+        for listing in db.query(SourceMovieListing).all()
+        if film_key(listing, canonical) == film_id
+    ]
+
+
+def _browse_rows(db: Session):
+    """One row per (listing, theatre) that has an upcoming screening.
+
+    What the browse list actually needs. It aggregates per film -- which
+    cinemas, which chains, how near the closest one is -- and never looks at an
+    individual showtime, so feeding it every screening meant eleven thousand
+    rows and five ORM objects each to produce ninety cards. DISTINCT collapses
+    a cinema's whole week of a film into the single fact the list uses: that it
+    plays there.
     """
     return (
+        db.query(SourceMovieListing, Theatre, CinemaSource, Movie)
+        .join(Screening, Screening.source_movie_listing_id == SourceMovieListing.id)
+        .join(Theatre, Theatre.id == Screening.theatre_id)
+        .join(CinemaSource, CinemaSource.id == Theatre.cinema_source_id)
+        .outerjoin(Movie, Movie.id == SourceMovieListing.movie_id)
+        .filter(Screening.showtime >= localtime.now_iso())
+        .filter(Screening.is_available.isnot(False))
+        .distinct()
+        .all()
+    )
+
+
+def _rows(db: Session, listing_ids: list[int] | None = None):
+    """Every upcoming screening joined to its listing, theatre, chain and movie.
+
+    One query rather than per-film lookups: both endpoints need the same join,
+    so N+1 here would be pointless. `listing_ids` narrows it to a single card's
+    listings, which is what the detail endpoint wants.
+    """
+    query = (
         db.query(Screening, SourceMovieListing, Theatre, CinemaSource, Movie)
         .join(SourceMovieListing, SourceMovieListing.id == Screening.source_movie_listing_id)
         .join(Theatre, Theatre.id == Screening.theatre_id)
@@ -242,8 +276,12 @@ def _rows(db: Session):
         # "never validated" (Lev, or anything added since the last pass) and
         # must still show. Only a positive finding hides a screening.
         .filter(Screening.is_available.isnot(False))
-        .all()
     )
+    if listing_ids is not None:
+        if not listing_ids:
+            return []
+        query = query.filter(Screening.source_movie_listing_id.in_(listing_ids))
+    return query.all()
 
 
 def best_poster(candidates: list[tuple], tmdb_poster: Optional[str]) -> Optional[str]:
@@ -267,19 +305,23 @@ def flag_possible_duplicates(films: list[dict]) -> None:
     chains word it completely differently). Anything caught here escaped the
     merge rules, so it is shown rather than acted on.
     """
-    import posters
     from titles import near_identical
 
+    # Hashes are hex strings on the cards; converting each once beats
+    # converting both sides of every pair.
+    bits = [int(f["poster_hash"], 16) if f.get("poster_hash") else None for f in films]
+
     for i, a in enumerate(films):
-        for b in films[i + 1:]:
-            same_poster = (
-                a.get("poster_hash") and b.get("poster_hash")
-                and posters.distance(a["poster_hash"], b["poster_hash"])
-                <= SUSPICIOUS_POSTER_DISTANCE
-            )
-            if same_poster or near_identical(a.get("title_he"), b.get("title_he")):
-                a["possible_duplicate"] = True
-                b["possible_duplicate"] = True
+        for j in range(i + 1, len(films)):
+            b = films[j]
+            if a["possible_duplicate"] and b["possible_duplicate"]:
+                continue        # both already flagged, nothing left to learn
+            if bits[i] is not None and bits[j] is not None:
+                if bin(bits[i] ^ bits[j]).count("1") <= SUSPICIOUS_POSTER_DISTANCE:
+                    a["possible_duplicate"] = b["possible_duplicate"] = True
+                    continue
+            if near_identical(a.get("title_he"), b.get("title_he")):
+                a["possible_duplicate"] = b["possible_duplicate"] = True
 
 
 def _chain_filter(chains: Optional[str]) -> set[str]:
@@ -320,7 +362,7 @@ def list_movies(
         films: dict[str, dict] = {}
         canonical = canonical_movie_ids(db)
 
-        for screening, listing, theatre, source, movie in _rows(db):
+        for listing, theatre, source, movie in _browse_rows(db):
             # Filtering here rather than in SQL keeps theatre_count and
             # nearest_km honest: they must describe only the chains the user
             # asked for, not the full set.
@@ -404,9 +446,10 @@ def movie_detail(
     try:
         wanted = _chain_filter(chains)
         canonical = canonical_movie_ids(db)
+        listing_ids = listing_ids_for_film(db, film_id, canonical)
         matching = [
-            r for r in _rows(db)
-            if film_key(r[1], canonical) == film_id and (not wanted or r[3].key in wanted)
+            r for r in _rows(db, listing_ids=listing_ids)
+            if not wanted or r[3].key in wanted
         ]
         if not matching:
             raise HTTPException(404, f"No current screenings for film '{film_id}'")
@@ -433,7 +476,15 @@ def movie_detail(
                     (poster_rank(listing, source.key), listing.poster_url)
                 )
             tmdb_poster = tmdb_poster or (movie.poster_url if movie else None)
-            meta["overview"] = meta["overview"] or (movie.overview if movie else None)
+            # TMDb first, then whichever chain published a description. TMDb
+            # carries no Hebrew overview for a fair number of films and none at
+            # all for anything it could not match, which is why some cards had
+            # a synopsis and some did not.
+            meta["overview"] = (
+                meta["overview"]
+                or (movie.overview if movie else None)
+                or listing.synopsis
+            )
             meta["genre"] = meta["genre"] or listing.genre
             meta["runtime_minutes"] = meta["runtime_minutes"] or listing.runtime_minutes
             meta["age_rating"] = meta["age_rating"] or listing.age_rating

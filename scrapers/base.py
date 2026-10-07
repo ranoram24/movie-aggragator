@@ -57,6 +57,11 @@ class MovieListing:
     premiere_date: Optional[str] = None
     age_rating: Optional[str] = None
 
+    # The chain's own plot description. TMDb has no Hebrew overview for a good
+    # number of films, and none at all for anything it could not match, so the
+    # chains are the only source for those.
+    synopsis: Optional[str] = None
+
     # Perceptual hash of the poster. Normally left None and computed on the
     # server, but Movieland and Planet firewall the production host, so their
     # posters are unreachable there and push_local.py fills this in from a

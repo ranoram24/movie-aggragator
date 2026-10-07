@@ -37,6 +37,27 @@ SQLITE_TYPES = {
 }
 
 
+def missing_indexes() -> list[tuple[str, str]]:
+    """(table, index name) for every index the models declare and the DB lacks.
+
+    create_all() builds indexes only alongside a table it is creating, so an
+    index added to an existing model never reaches a deployed database -- the
+    same gap this module already covers for columns.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    pending = []
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue
+        have = {ix["name"] for ix in inspector.get_indexes(table.name)}
+        for index in table.indexes:
+            if index.name not in have:
+                pending.append((table.name, index.name))
+    return pending
+
+
 def missing_columns() -> list[tuple[str, str, str]]:
     """(table, column, type) for every column the models have and the DB lacks."""
     inspector = inspect(engine)
@@ -56,30 +77,46 @@ def missing_columns() -> list[tuple[str, str, str]]:
 
 
 def run() -> int:
-    """Apply the additions. Returns how many columns were added."""
+    """Apply the additions. Returns how many columns and indexes were added."""
     pending = missing_columns()
-    if not pending:
-        return 0
 
-    with engine.begin() as connection:
-        for table_name, column_name, column_type in pending:
-            # A new column is always nullable: existing rows have no value for
-            # it, so NOT NULL without a default would be rejected outright.
-            connection.execute(
-                text(f'ALTER TABLE {table_name} ADD COLUMN "{column_name}" {column_type}')
-            )
-            log.info("added column %s.%s (%s)", table_name, column_name, column_type)
-    return len(pending)
+    if pending:
+        with engine.begin() as connection:
+            for table_name, column_name, column_type in pending:
+                # A new column is always nullable: existing rows have no value
+                # for it, so NOT NULL without a default would be rejected.
+                connection.execute(
+                    text(f'ALTER TABLE {table_name} ADD COLUMN "{column_name}" {column_type}')
+                )
+                log.info("added column %s.%s (%s)", table_name, column_name, column_type)
+
+    # Indexes after columns, since an index may well be on a column just added.
+    # Building one over a large table takes a moment, which is why this logs
+    # before rather than after.
+    indexes = missing_indexes()
+    by_name = {
+        index.name: index
+        for table in Base.metadata.sorted_tables
+        for index in table.indexes
+    }
+    for table_name, index_name in indexes:
+        log.info("creating index %s on %s ...", index_name, table_name)
+        by_name[index_name].create(bind=engine)
+        log.info("created index %s", index_name)
+
+    return len(pending) + len(indexes)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     pending = missing_columns()
-    if not pending:
+    indexes = missing_indexes()
+    if not pending and not indexes:
         print("Schema is already up to date.")
     else:
-        print(f"Adding {len(pending)} column(s):")
         for table_name, column_name, column_type in pending:
-            print(f"  {table_name}.{column_name} {column_type}")
+            print(f"  column {table_name}.{column_name} {column_type}")
+        for table_name, index_name in indexes:
+            print(f"  index  {index_name} on {table_name}")
         run()
         print("Done.")

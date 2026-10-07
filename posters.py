@@ -31,6 +31,7 @@ from datetime import datetime
 import requests
 
 from models import SourceMovieListing
+from titles import title_slug
 
 log = logging.getLogger("posters")
 
@@ -127,7 +128,24 @@ def hash_missing(db, limit: int | None = None) -> dict:
 
 
 def group(db) -> dict:
-    """Cluster listings by poster and record which cluster each belongs to.
+    """Cluster listings that are the same film, and record the cluster on each.
+
+    Two signals, joined rather than ranked:
+
+      * their posters are near-identical, which survives any difference in
+        wording, and
+      * their titles reduce to the same slug, which survives a chain that
+        publishes no artwork at all.
+
+    Both are needed, and preferring one over the other actively breaks things.
+    An earlier version keyed on the poster group when present and fell back to
+    the title slug otherwise, which SPLIT films the title alone had already
+    united: "ילד המדבר" is listed by four chains under one slug, but Lev
+    publishes no posters, so its listing fell to the title key while the other
+    three shared a poster key. Two cards for a film that had been one.
+
+    Lev is where this bites, because none of its 35 listings carries a poster
+    URL -- it can never join a poster cluster on its own.
 
     Union-find, not greedy assignment against a representative. Greedy is
     order-dependent and splits real groups: if A is within range of B and B of
@@ -144,11 +162,10 @@ def group(db) -> dict:
     card, complete with synopsis and runtime, rather than merely drawing them
     side by side.
     """
+    # Every listing, not only the ones with artwork: a posterless listing still
+    # has a title, and that is exactly the case this has to handle.
     listings = (
-        db.query(SourceMovieListing)
-        .filter(SourceMovieListing.poster_hash.isnot(None))
-        .order_by(SourceMovieListing.id)
-        .all()
+        db.query(SourceMovieListing).order_by(SourceMovieListing.id).all()
     )
 
     parent = list(range(len(listings)))
@@ -164,8 +181,23 @@ def group(db) -> dict:
         if a != b:
             parent[max(a, b)] = min(a, b)
 
-    for i in range(len(listings)):
-        for j in range(i + 1, len(listings)):
+    # Title edges first, and by index rather than pairwise: listings sharing a
+    # slug are one group, which is O(n) instead of O(n^2).
+    by_slug: dict[str, list[int]] = {}
+    for index, listing in enumerate(listings):
+        slug = title_slug(listing.raw_title)
+        if slug:
+            by_slug.setdefault(slug, []).append(index)
+    for members in by_slug.values():
+        for other in members[1:]:
+            union(members[0], other)
+
+    # Poster edges. Only listings that actually have a hash take part, and the
+    # comparison is skipped once two are already in the same group.
+    hashed = [i for i, l in enumerate(listings) if l.poster_hash]
+    for a in range(len(hashed)):
+        for b in range(a + 1, len(hashed)):
+            i, j = hashed[a], hashed[b]
             if find(i) == find(j):
                 continue
             if distance(listings[i].poster_hash, listings[j].poster_hash) <= MAX_DISTANCE:
@@ -177,9 +209,10 @@ def group(db) -> dict:
 
     grouped = adopted = 0
     for root, members in clusters.items():
-        # The lowest listing id in the cluster names it, so the group key is
-        # stable across runs rather than depending on iteration order.
-        rep_hash = listings[root].poster_hash
+        # Named by the first hash in the cluster, so the key is stable across
+        # runs. A cluster where nobody has artwork keeps a NULL group and its
+        # members fall back to the title slug, which already unites them.
+        rep_hash = next((m.poster_hash for m in members if m.poster_hash), None)
         for member in members:
             if member.poster_group != rep_hash:
                 member.poster_group = rep_hash
@@ -203,6 +236,7 @@ def group(db) -> dict:
     multi = sum(1 for members in clusters.values() if len(members) > 1)
     return {
         "listings": len(listings),
+        "with_poster": len(hashed),
         "clusters": len(clusters),
         "multi_chain_clusters": multi,
         "grouped": grouped,

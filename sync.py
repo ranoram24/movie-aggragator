@@ -52,7 +52,13 @@ def upsert_theatre(db, cinema_source_id: int, theater) -> Theatre:
         db.add(row)
 
     row.name = theater.name
-    row.address = theater.address
+    # Never overwrite a stored address with nothing, the same rule the
+    # coordinates below already followed and that upsert_listing applies to its
+    # metadata. Cinema City's ticketing API publishes no address at all, so an
+    # unconditional assignment here would have blanked all eight cinemas -- and
+    # with them the geocoding that distance sorting depends on.
+    if theater.address is not None:
+        row.address = theater.address
     if theater.latitude is not None:
         row.latitude = theater.latitude
     if theater.longitude is not None:
@@ -78,7 +84,7 @@ def upsert_listing(db, cinema_source_id: int, movie) -> SourceMovieListing:
     # Refreshed every run, but never overwrite a real value with a null -- some
     # chains expose metadata on only one of their endpoints.
     for field in ("poster_url", "genre", "runtime_minutes", "premiere_date",
-                  "age_rating", "poster_hash"):
+                  "age_rating", "poster_hash", "synopsis"):
         value = getattr(movie, field)
         if value is not None:
             setattr(row, field, value)

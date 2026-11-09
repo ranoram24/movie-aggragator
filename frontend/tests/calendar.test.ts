@@ -26,6 +26,7 @@ import {
   REMINDER_HOURS,
   buildIcs,
   durationMinutes,
+  googleCalendarUrl,
   icsFilename,
   type ScreeningEvent,
 } from '../src/api/calendar.ts';
@@ -179,6 +180,40 @@ check('a VIP hall is noted',
   buildIcs({ ...BASE, venueType: 'VIP' }, NOW).includes('VIP'));
 check('an ordinary hall is not spelled out',
   !(value('DESCRIPTION:') ?? '').includes('regular'));
+
+// ---- the Google Calendar route -------------------------------------------
+
+const gcal = new URL(googleCalendarUrl(BASE));
+const q = gcal.searchParams;
+
+eq('points at Google Calendar', gcal.host, 'calendar.google.com');
+eq('asks for a new event', q.get('action'), 'TEMPLATE');
+eq('carries the same window as the file', q.get('dates'),
+  '20261112T202000/20261112T231000');
+check('titles with the film and the cinema',
+  (q.get('text') ?? '').includes('האודיסאה')
+  && (q.get('text') ?? '').includes('סינמה סיטי נתניה'));
+check('carries the address', (q.get('location') ?? '').includes('המחקר 3'));
+check('links back to the booking',
+  (q.get('details') ?? '').includes('tickets.cinema-city.co.il'));
+
+// Google resolves the offset itself from a zone name, which is the one thing
+// this route does BETTER than the file — the .ics has to leave time floating
+// because a VTIMEZONE block would be needed to say this properly.
+eq('names the timezone rather than guessing an offset',
+  q.get('ctz'), 'Asia/Jerusalem');
+check('the times are naive, for ctz to interpret',
+  !(q.get('dates') ?? '').includes('Z'));
+
+// Hebrew and separators have to survive the query string intact.
+check('hebrew round-trips through the URL',
+  new URL(googleCalendarUrl({ ...BASE, filmTitle: 'מואנה, הסרט' }))
+    .searchParams.get('text')?.includes('מואנה, הסרט') === true);
+
+// The documented gap, asserted so nobody later assumes it was handled.
+check('no reminder parameter exists to set',
+  !['reminder', 'reminders', 'alarm', 'notification']
+    .some((key) => q.has(key)));
 
 // ---- filename ------------------------------------------------------------
 

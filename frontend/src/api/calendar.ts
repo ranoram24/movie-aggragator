@@ -207,6 +207,46 @@ export function buildIcs(event: ScreeningEvent, now: Date = new Date()): string 
   return `${lines.map(fold).join('\r\n')}\r\n`;
 }
 
+/**
+ * A Google Calendar "new event" page, prefilled.
+ *
+ * The fast route: two taps and the event is in the Google account, synced to
+ * every device, with no file to find in a downloads folder.
+ *
+ * WHAT IT CANNOT DO IS THE REMINDER. This prefill interface accepts a title,
+ * a time range, a location, a description, a timezone, guests and a recurrence
+ * rule — and has no parameter for an alarm of any kind. An event created this
+ * way gets whatever default notification the account is configured with,
+ * typically ten or thirty minutes. That is why downloadIcs still exists beside
+ * this: the file is the only one of the two that can carry TRIGGER:-PT2H.
+ *
+ * The timezone IS handled properly here, better than in the file. Passing
+ * naive times plus ctz=Asia/Jerusalem makes Google resolve the offset for the
+ * screening's own date, DST included, which is exactly what the .ics has to
+ * leave floating.
+ */
+export function googleCalendarUrl(event: ScreeningEvent): string {
+  const start = localStamp(event.date, event.time);
+  const end = addMinutes(event.date, event.time, durationMinutes(event.runtimeMinutes));
+
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `${event.filmTitle} — ${event.cinema}`,
+    dates: `${start}/${end}`,
+    location: event.address ? `${event.cinema}, ${event.address}` : event.cinema,
+    details: [
+      event.chain,
+      event.venueType !== 'regular' ? event.venueType : null,
+      event.ticketUrl,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    ctz: 'Asia/Jerusalem',
+  });
+
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
 /** A filename that will not upset a filesystem, derived from the film. */
 export function icsFilename(event: ScreeningEvent): string {
   const slug = `${event.filmTitle}-${event.date}-${event.time}`

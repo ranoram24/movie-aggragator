@@ -22,12 +22,18 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { REMINDER_HOURS, durationMinutes, type ScreeningEvent } from '../api/calendar';
+import {
+  REMINDER_HOURS,
+  durationMinutes,
+  googleCalendarUrl,
+  type ScreeningEvent,
+} from '../api/calendar';
 import './CalendarPrompt.css';
 
 interface Props {
   /** The screening to offer, or null when there is nothing to ask about. */
   event: ScreeningEvent | null;
+  /** Downloads the .ics — the route that carries the reminder. */
   onSave: () => void;
   onDismiss: () => void;
 }
@@ -111,29 +117,50 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
           </div>
         </dl>
 
-        {/* Said plainly, because both are assumptions the event encodes and
-            neither is visible once it is in the calendar. */}
+        {/* An assumption the event encodes that is invisible once it is in
+            the calendar, so it is stated before you commit to it. */}
         <p className="calprompt__note">
-          תזכורת {REMINDER_HOURS} שעות לפני · משך האירוע {minutes} דק׳ כולל פרסומות
+          משך האירוע {minutes} דק׳ כולל פרסומות
         </p>
 
         <div className="calprompt__actions">
+          {/* Google first: for most people it is two taps and the event is
+              already synced to every device. */}
+          <a
+            className="calprompt__google pressable"
+            href={googleCalendarUrl(event)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={onDismiss}
+          >
+            Google Calendar
+          </a>
+
           <button
             type="button"
             className="calprompt__save pressable"
             onClick={onSave}
             autoFocus
           >
-            הוספה ליומן
-          </button>
-          <button
-            type="button"
-            className="calprompt__skip pressable"
-            onClick={onDismiss}
-          >
-            לא עכשיו
+            קובץ · תזכורת {REMINDER_HOURS} שעות
           </button>
         </div>
+
+        {/* The difference between the two, in one line, because it is not
+            guessable and it is the only reason to pick the slower one.
+            Google's prefill interface has no parameter for an alarm, so an
+            event made that way gets the account's default notification. */}
+        <p className="calprompt__hint">
+          ב-Google התזכורת היא ברירת המחדל שלך · בקובץ היא {REMINDER_HOURS} שעות
+        </p>
+
+        <button
+          type="button"
+          className="calprompt__skip pressable"
+          onClick={onDismiss}
+        >
+          לא עכשיו
+        </button>
       </div>
     </dialog>
   );

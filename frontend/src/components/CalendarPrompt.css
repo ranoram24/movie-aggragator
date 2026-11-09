@@ -85,16 +85,30 @@
 }
 
 .calprompt__actions {
+  /* The two real choices sit side by side as equals: one is faster, the
+     other keeps the reminder, and neither is simply better. */
   display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 9px;
 }
 
+.calprompt__google,
 .calprompt__save,
 .calprompt__skip {
+  display: grid;
+  place-items: center;
   min-height: var(--tap-min);
+  padding: 8px 10px;
   border-radius: var(--radius-sm);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
+  text-align: center;
+  line-height: 1.25;
+}
+
+.calprompt__google {
+  background: var(--text);
+  color: var(--bg);
 }
 
 .calprompt__save {
@@ -102,11 +116,24 @@
   color: var(--accent-ink);
 }
 
+/* Sets the two apart in one line. Deliberately below the buttons rather than
+   above: it is only read by someone already deciding between them. */
+.calprompt__hint {
+  margin: 10px 0 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  text-align: center;
+}
+
 .calprompt__skip {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-faint);
   font-weight: 600;
+  font-size: 13.5px;
+  min-height: 38px;
 }
 
 /* ---- desktop --------------------------------------------------------------
@@ -133,14 +160,10 @@
   }
 
   .calprompt__title { font-size: 21px; }
-
-  .calprompt__actions {
-    grid-template-columns: 1fr 1fr;
-    direction: rtl;
-  }
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .calprompt__google:hover,
   .calprompt__save:hover { filter: brightness(1.08); }
-  .calprompt__skip:hover { border-color: var(--text-faint); color: var(--text); }
+  .calprompt__skip:hover { color: var(--text); }
 }

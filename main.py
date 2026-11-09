@@ -235,11 +235,31 @@ if FRONTEND_DIST.is_dir():
         React Router owns routes like /movie/m17, which exist only in the
         browser -- there is no such file on disk, so without this a refresh or
         a shared link would 404.
+
+        The resolve-and-contain check is not optional. Joining a request path
+        onto a directory is path traversal (CWE-22) on its own: FastAPI hands
+        this parameter over percent-DECODED, so a request for
+        /..%2f..%2f..%2fetc/passwd arrives here as the literal string
+        "../../../etc/passwd" -- the proxy and the router both see an opaque
+        segment and normalise nothing. Against the deployed app that served
+        /etc/passwd and the application's own source, verbatim.
+
+        resolve() collapses the .. segments and follows symlinks, so the
+        containment test sees the real target rather than the path as written;
+        is_relative_to then refuses anything that landed outside the build
+        directory. Checked BEFORE is_file, so a path outside is rejected on
+        shape alone and the existence of a file there is never probed -- a 404
+        that varies by whether the file exists is itself a disclosure.
+
+        /assets is mounted separately on StaticFiles, which has always done
+        this check itself; only this hand-written fallback was missing it.
         """
-        candidate = FRONTEND_DIST / full_path
-        if full_path and candidate.is_file():
+        root = FRONTEND_DIST.resolve()
+        candidate = (root / full_path).resolve()
+        inside = candidate == root or candidate.is_relative_to(root)
+        if full_path and inside and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(FRONTEND_DIST / "index.html")
+        return FileResponse(root / "index.html")
 
 else:
     @app.get("/", include_in_schema=False)

@@ -1,0 +1,138 @@
+.searchbar {
+  padding: 0 var(--gutter) 14px;
+}
+
+.searchbar__field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  /* Matches the location nudge and the chain chips rather than inventing a
+     third surface treatment. */
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 12px;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+/* Focus shown on the container, not the input, since the input's own outline
+   would be drawn inside the rounded border and look clipped. */
+.searchbar__field:focus-within {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+
+.searchbar__icon {
+  font-size: 14px;
+  opacity: 0.55;
+  flex: 0 0 auto;
+}
+
+.searchbar__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Full tap height on the input itself, so the whole bar is the target. */
+  min-height: var(--tap-min);
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  /* 16px exactly: iOS Safari zooms the page when a focused input is any
+     smaller, which on a filter field means the layout lurches sideways the
+     moment you start typing. */
+  font-size: 16px;
+  outline: none;
+}
+
+.searchbar__input::placeholder {
+  color: var(--text-faint);
+}
+
+/* The native clear widget: WebKit draws a grey cross that is invisible on this
+   background and sits outside the focus ring, and Edge adds its own. Both are
+   replaced by .searchbar__clear, which inherits the theme and has a label. */
+.searchbar__input::-webkit-search-cancel-button,
+.searchbar__input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.searchbar__input::-ms-clear {
+  display: none;
+}
+
+.searchbar__clear {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  /* 30px visually, but padding takes the hit area to the 44px minimum without
+     making the bar taller. */
+  width: 30px;
+  height: 30px;
+  margin: 0 -4px;
+  padding: 7px;
+  box-sizing: content-box;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.searchbar__count {
+  margin: 7px 2px 0;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- desktop --------------------------------------------------------------
+   Aligned to the shared content width like the header and the grid, and capped
+   well short of it: a search field stretched across 1400px is a dead giveaway
+   of a phone layout scaled up, and the text would start a long way from the
+   icon that labels it. */
+@media (min-width: 860px) {
+  .searchbar {
+    max-width: var(--content-max);
+    margin-inline: auto;
+    padding-bottom: 20px;
+  }
+
+  .searchbar__field {
+    max-width: 420px;
+  }
+
+  .searchbar__count {
+    font-size: 13px;
+  }
+}
+
+/* Inside the detail screen's rail the grid already supplies the gutter, and
+   the rail is 360px wide -- narrower than the cap above, so the field should
+   simply fill it. */
+@media (min-width: 1024px) {
+  .detail__rail .searchbar {
+    padding-inline: 0;
+    padding-bottom: 14px;
+  }
+
+  .detail__rail .searchbar__field {
+    max-width: none;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .searchbar__field:hover {
+    border-color: var(--text-faint);
+  }
+
+  .searchbar__field:focus-within:hover {
+    border-color: var(--accent);
+  }
+
+  .searchbar__clear:hover {
+    background: var(--border);
+    color: var(--text);
+  }
+}

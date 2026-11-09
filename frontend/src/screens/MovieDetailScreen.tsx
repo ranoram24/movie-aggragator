@@ -11,6 +11,8 @@ import { useGeolocation } from '../hooks/useGeolocation';
 import { useMovie } from '../hooks/useMovie';
 import { ChainFilter } from '../components/ChainFilter';
 import { DubFilter, audioKey, type AudioOption } from '../components/DubFilter';
+import { SearchBar } from '../components/SearchBar';
+import { filterTheatres } from '../api/search';
 import { languageName } from '../api/language';
 import { PosterImage } from '../components/PosterImage';
 import { TheaterList } from '../components/TheaterList';
@@ -25,6 +27,7 @@ export function MovieDetailScreen() {
   const [scrolled, setScrolled] = useState(false);
   const [chains, setChains] = useState<string[]>([]);
   const [audio, setAudio] = useState<string[]>([]);
+  const [city, setCity] = useState('');
 
   // Filtering happens here rather than server-side: the response already holds
   // every theatre, so narrowing is instant and costs no request.
@@ -56,14 +59,20 @@ export function MovieDetailScreen() {
     return [...tally.values()].sort((a, b) => b.count - a.count);
   }, [movie]);
 
-  // Both filters apply together, and both prune empty containers as they go:
-  // a date with no matching showtimes, or a theatre with no matching dates,
-  // should disappear rather than render as an empty heading.
+  // All three filters apply together, and the last two prune empty containers
+  // as they go: a date with no matching showtimes, or a theatre with no
+  // matching dates, should disappear rather than render as an empty heading.
+  //
+  // The order is the important part. Chain narrows the set FIRST, so the city
+  // text only ever sees theatres the chain filter already allowed -- that is
+  // what makes "only Movieland" + "נתניה" structurally incapable of returning
+  // Cinema City Netanya, rather than relying on the two filters agreeing.
   const visibleTheatres = useMemo(() => {
     let theatres = movie?.theatres ?? [];
     if (chains.length) {
       theatres = theatres.filter((t) => chains.includes(t.chain));
     }
+    theatres = filterTheatres(theatres, city);
     if (!audio.length) return theatres;
 
     return theatres
@@ -79,7 +88,7 @@ export function MovieDetailScreen() {
           .filter((group) => group.showtimes.length > 0),
       }))
       .filter((theatre) => theatre.dates.length > 0);
-  }, [movie, chains, audio]);
+  }, [movie, chains, audio, city]);
 
   const toggleChain = (chain: string) =>
     setChains((current) =>
@@ -108,6 +117,7 @@ export function MovieDetailScreen() {
     window.scrollTo(0, 0);
     setChains([]);
     setAudio([]);
+    setCity('');
   }, [id]);
 
   const facts = movie
@@ -191,6 +201,22 @@ export function MovieDetailScreen() {
                 <p className="detail__overview">{movie.overview}</p>
               )}
 
+              {/* Hidden for a film at one or two cinemas: both fit on screen
+                  at once, so a box to narrow them down is pure furniture. The
+                  chain and dub chips hide themselves on the same reasoning. */}
+              {movie.theatres.length >= 3 && (
+                <SearchBar
+                  value={city}
+                  onChange={setCity}
+                  placeholder="חיפוש עיר או בית קולנוע"
+                  label="חיפוש לפי עיר"
+                  resultCount={visibleTheatres.length}
+                  resultNoun={
+                    visibleTheatres.length === 1 ? 'בית קולנוע' : 'בתי קולנוע'
+                  }
+                />
+              )}
+
               <DubFilter
                 options={audioOptions}
                 selected={audio}
@@ -213,9 +239,17 @@ export function MovieDetailScreen() {
               ) : (
                 <EmptyState
                   message={
-                    movie.theatres.length
-                      ? 'אין הקרנות מתאימות לסינון שנבחר.'
-                      : 'אין הקרנות קרובות לסרט הזה.'
+                    !movie.theatres.length
+                      ? 'אין הקרנות קרובות לסרט הזה.'
+                      : city.trim()
+                        // Says the quiet part out loud: with a chain chip on,
+                        // an empty city result usually means the city is fine
+                        // and the chain is the reason, which is impossible to
+                        // guess from "no matching screenings".
+                        ? `אין הקרנות ב"${city.trim()}"${
+                            chains.length ? ' ברשתות שנבחרו' : ''
+                          }.`
+                        : 'אין הקרנות מתאימות לסינון שנבחר.'
                   }
                 />
               )}

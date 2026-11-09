@@ -452,7 +452,15 @@ def movie_detail(
             if not wanted or r[3].key in wanted
         ]
         if not matching:
-            raise HTTPException(404, f"No current screenings for film '{film_id}'")
+            # Deliberately does not echo film_id. Reflecting raw request input
+            # is harmless here -- the response is JSON, the client substitutes
+            # its own message, and nothing renders `detail` as markup -- but it
+            # buys nothing either, since the id is right there in the request
+            # URL of anyone reading the error. Not creating the reflection is
+            # cheaper than reasoning about whether this one is safe, and it
+            # keeps the "no request input is echoed anywhere" invariant that
+            # test_search_security.py can then simply assert.
+            raise HTTPException(404, "No current screenings for that film.")
 
         today = localtime.today()
         by_theatre: dict[int, dict] = {}

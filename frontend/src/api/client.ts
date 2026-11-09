@@ -59,8 +59,15 @@ async function getJson<T>(path: string, params?: Record<string, string | number 
   return (await response.json()) as T;
 }
 
-/** Films currently playing. Pass coords to sort by distance. */
-export function fetchMovies(coords: Coords | null, limit = 100): Promise<MovieSummary[]> {
+/** Films currently playing. Pass coords to sort by distance.
+ *
+ *  The limit is the API's own maximum rather than a page size, because the
+ *  browse screen's search filters this array in the browser. A short limit
+ *  would make search quietly incomplete: ask for 100, get the 95 films showing
+ *  this week, and a title ranked 101st is unfindable with no hint that it was
+ *  ever excluded. 300 is roughly three times the catalogue, so the gap between
+ *  "no results" and "not fetched" stays closed. */
+export function fetchMovies(coords: Coords | null, limit = 300): Promise<MovieSummary[]> {
   return getJson<MovieSummary[]>('/api/movies', {
     lat: coords?.lat,
     lon: coords?.lon,

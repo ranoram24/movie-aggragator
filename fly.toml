@@ -12,7 +12,10 @@
 #     container filesystem and resets to empty on every deploy.
 
 app = "on-cinema-now"
-primary_region = "cdg"   # Paris — closest Fly region to Israel for latency
+# Moved off cdg in November 2026: that host suffered a hardware failure and
+# took the machine and its volume with it. fra is the next closest region to
+# Israel and sits on different hardware.
+primary_region = "fra"   # Frankfurt
 
 [build]
 

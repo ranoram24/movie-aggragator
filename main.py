@@ -129,6 +129,12 @@ class ScrapeStatusResponse(BaseModel):
     validation_horizon_hours: int
     validation_intervals_seconds: dict[str, int]
     validation: dict[str, dict]
+    # Not a chain and not keyed by one: a single Telegram channel giving one
+    # digital release date per film. Its own block for the same reason
+    # validation has one -- it fails independently of every scraper, and
+    # folding it into `chains` would imply it has theatres and showtimes.
+    digital_interval_seconds: int
+    digital: dict
 
 
 class ScrapeStartedResponse(BaseModel):
@@ -171,6 +177,8 @@ def scrape_status() -> ScrapeStatusResponse:
             for key in scheduler.VALIDATION_STATUS
         },
         "validation": scheduler.VALIDATION_STATUS,
+        "digital_interval_seconds": scheduler.DIGITAL_INTERVAL,
+        "digital": scheduler.DIGITAL_STATUS,
     }
 
 

@@ -76,8 +76,28 @@ def missing_columns() -> list[tuple[str, str, str]]:
     return pending
 
 
+def missing_tables() -> list[str]:
+    """Tables the models declare and the database lacks."""
+    existing = set(inspect(engine).get_table_names())
+    return [t.name for t in Base.metadata.sorted_tables if t.name not in existing]
+
+
 def run() -> int:
-    """Apply the additions. Returns how many columns and indexes were added."""
+    """Apply the additions. Returns how many objects were created.
+
+    Whole tables first. create_all() is what normally builds those, but it is
+    called from the app's startup, so anything running outside the server --
+    this module's CLI, a scraper invoked by hand, a one-off backfill -- used to
+    find the table simply absent. Including it here means "bring the database
+    up to date" is one entry point rather than two, which is what the module
+    claims to be.
+    """
+    tables = missing_tables()
+    if tables:
+        Base.metadata.create_all(bind=engine)
+        for name in tables:
+            log.info("created table %s", name)
+
     pending = missing_columns()
 
     if pending:
@@ -104,16 +124,19 @@ def run() -> int:
         by_name[index_name].create(bind=engine)
         log.info("created index %s", index_name)
 
-    return len(pending) + len(indexes)
+    return len(tables) + len(pending) + len(indexes)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    tables = missing_tables()
     pending = missing_columns()
     indexes = missing_indexes()
-    if not pending and not indexes:
+    if not tables and not pending and not indexes:
         print("Schema is already up to date.")
     else:
+        for table_name in tables:
+            print(f"  table  {table_name}")
         for table_name, column_name, column_type in pending:
             print(f"  column {table_name}.{column_name} {column_type}")
         for table_name, index_name in indexes:

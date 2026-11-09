@@ -6,6 +6,7 @@
 
 import { Link } from 'react-router-dom';
 import type { MovieSummary } from '../api/types';
+import { digitalLabel } from '../api/dates';
 import { PosterImage } from './PosterImage';
 import './MovieCard.css';
 
@@ -14,6 +15,8 @@ interface Props {
 }
 
 export function MovieCard({ movie }: Props) {
+  const digital = digitalLabel(movie.digital_date);
+
   return (
     <Link to={`/movie/${movie.id}`} className="movie-card pressable">
       <div className="movie-card__poster">
@@ -42,6 +45,12 @@ export function MovieCard({ movie }: Props) {
           {movie.possible_duplicate && movie.chains.length > 0 && (
             <p className="movie-card__chains">{movie.chains.join(' · ')}</p>
           )}
+          {/* Stated, not argued. It sits in the same quiet register as the
+              cinema count rather than in a badge, because a coloured flag
+              would be the app having an opinion about whether to wait — and
+              the whole point is that the reader draws their own conclusion
+              from the date. */}
+          {digital && <p className="movie-card__digital">{digital}</p>}
         </div>
       </div>
     </Link>

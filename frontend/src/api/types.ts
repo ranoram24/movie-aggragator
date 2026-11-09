@@ -24,6 +24,10 @@ export interface MovieSummary {
   /** Another card looks like the same film; the card names its chains so the
    *  split is visible without opening both. */
   possible_duplicate: boolean;
+  /** ISO date this film reaches digital in Israel, from the release-date
+   *  channel. null when unknown, which includes every film TMDb could not
+   *  match — the join is on tmdb_id. */
+  digital_date: string | null;
 }
 
 export interface Showtime {
@@ -75,6 +79,8 @@ export interface MovieDetail {
   /** ISO-639-1 the film was made in. A property of the film, unlike a
    *  screening's dubbed_language. */
   original_language: string | null;
+  /** ISO date this film reaches digital in Israel. See MovieSummary. */
+  digital_date: string | null;
   theatres: Theatre[];
 }
 

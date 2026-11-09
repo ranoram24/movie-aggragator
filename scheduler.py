@@ -45,6 +45,8 @@ Intervals can be overridden without editing this file:
     SCRAPE_MATCH_AFTER_SYNC=1      # 0 to skip the TMDb matching pass
     SCRAPE_GEOCODE_AFTER_SYNC=1    # 0 to skip filling in theatre coordinates
     SCRAPE_SKIP_CHAINS=movieland,planet   # chains pushed in from outside
+    DIGITAL_INTERVAL=7200          # 0 disables the digital-dates scan
+    DIGITAL_SCAN_PAGES=12          # how far back each scan re-reads
 """
 
 import asyncio
@@ -111,6 +113,18 @@ VALIDATION_CHAINS = {
     if c.strip()
 }
 
+# ---- digital release dates -----------------------------------------------
+# A different kind of source: one Telegram channel, not a cinema chain, and it
+# produces a date per film rather than showtimes. See digital_dates.py.
+#
+# Two hours matches the chains, and costs far less -- a scan is a dozen page
+# requests against a public channel, against hundreds for a chain. The reason
+# not to run it slower is that a stale date here is a WRONG answer rather than
+# a missing one: everywhere else in this app going stale means a screening
+# quietly disappears, but a digital date that has moved and not been re-read
+# is shown to someone as fact.
+DIGITAL_INTERVAL = int(os.getenv("DIGITAL_INTERVAL", 2 * 60 * 60))
+
 # Seconds to wait before each chain's first run, so five scrapes don't all
 # start in the same instant on boot.
 STARTUP_STAGGER = 20
@@ -137,6 +151,11 @@ VALIDATION_STATUS: dict[str, dict] = {
     key: {"state": "pending", "last_run": None, "last_result": None,
           "last_error": None, "runs": 0}
     for key in SCRAPERS
+}
+
+DIGITAL_STATUS: dict = {
+    "state": "pending", "last_run": None, "last_success": None,
+    "last_result": None, "last_error": None, "runs": 0, "failures": 0,
 }
 
 
@@ -368,6 +387,126 @@ async def _validation_loop(key: str, initial_delay: float) -> None:
         raise
 
 
+def _digital_fetch() -> dict:
+    """Blocking, network only. No database session, so it needs no lock."""
+    import digital_dates
+
+    return digital_dates.scan()
+
+
+def _digital_store(releases: dict) -> dict:
+    """Blocking, database only. Its own session, as always."""
+    import digital_dates
+
+    db = SessionLocal()
+    try:
+        return digital_dates.store(db, releases)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _tmdb_candidates() -> list[int]:
+    """Blocking, read-only. Which films TMDb should be asked about."""
+    import digital_dates
+
+    db = SessionLocal()
+    try:
+        return digital_dates.tmdb_candidates(db)
+    finally:
+        db.close()
+
+
+def _tmdb_fetch(tmdb_ids: list[int]) -> dict:
+    """Blocking, network only. Up to TMDB_BATCH requests, so never under lock."""
+    import digital_dates
+
+    return digital_dates.fetch_tmdb_dates(tmdb_ids)
+
+
+def _tmdb_store(dates: dict) -> dict:
+    """Blocking, database only."""
+    import digital_dates
+
+    db = SessionLocal()
+    try:
+        return digital_dates.apply_tmdb_dates(db, dates)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+async def _digital_once() -> None:
+    DIGITAL_STATUS["state"] = "running"
+    DIGITAL_STATUS["last_run"] = _now()
+    DIGITAL_STATUS["runs"] += 1
+    try:
+        # Fetch outside the lock, exactly like the chains. Measured: a twelve
+        # page scan takes about thirty seconds, almost all of it waiting on
+        # the network and the politeness delay between pages. Holding a write
+        # lock through that would stall every other writer for half a minute
+        # every two hours -- the same mistake that once put a validation pass
+        # 2m49s behind a Lev scrape. The store that follows is a couple of
+        # hundred upserts and takes milliseconds.
+        releases = await asyncio.to_thread(_digital_fetch)
+        async with _write_lock:
+            result = await asyncio.to_thread(_digital_store, releases)
+
+        # Then top up from TMDb for the films the channel says nothing about.
+        # Same three-phase shape, same reason: up to TMDB_BATCH requests must
+        # not happen under the write lock.
+        #
+        # This block is what was missing. fill_from_tmdb was wired into
+        # digital_dates.run(), which the CLI calls -- but this loop calls
+        # scan/store directly so it can keep the fetch out of the lock, and so
+        # it never ran the TMDb half at all. Testing the function on its own
+        # proved the function; it did not prove it was reachable.
+        try:
+            candidates = await asyncio.to_thread(_tmdb_candidates)
+            if candidates:
+                dates = await asyncio.to_thread(_tmdb_fetch, candidates)
+                async with _write_lock:
+                    result.update(await asyncio.to_thread(_tmdb_store, dates))
+        except Exception as exc:
+            # The channel is the real source and its scan is already committed
+            # above. A TMDb outage must not undo it or mark the run failed.
+            log.warning("tmdb digital fallback skipped: %s: %s",
+                        type(exc).__name__, exc)
+
+        DIGITAL_STATUS["last_result"] = result
+        DIGITAL_STATUS["last_success"] = _now()
+        DIGITAL_STATUS["last_error"] = None
+        DIGITAL_STATUS["state"] = "idle"
+        if result.get("added") or result.get("updated"):
+            log.info("digital dates: %s added, %s updated (of %s scanned)",
+                     result["added"], result["updated"], result["scanned"])
+    except asyncio.CancelledError:
+        DIGITAL_STATUS["state"] = "cancelled"
+        raise
+    except Exception as exc:
+        DIGITAL_STATUS["state"] = "error"
+        DIGITAL_STATUS["last_error"] = f"{type(exc).__name__}: {exc}"
+        DIGITAL_STATUS["failures"] += 1
+        # Never fatal, and never destructive: a failed scan leaves every stored
+        # date exactly as it was, which is almost certainly still correct.
+        log.warning("digital dates scan failed: %s: %s", type(exc).__name__, exc)
+
+
+async def _digital_loop(initial_delay: float) -> None:
+    try:
+        await asyncio.sleep(initial_delay)
+        while True:
+            await _digital_once()
+            await asyncio.sleep(DIGITAL_INTERVAL)
+    except asyncio.CancelledError:
+        log.info("digital dates loop stopped")
+        raise
+
+
 async def _chain_loop(key: str, initial_delay: float) -> None:
     """One chain, forever: wait, scrape, repeat."""
     try:
@@ -409,6 +548,14 @@ def start(tasks: list[asyncio.Task]) -> None:
                 "external" if key in SKIP_CHAINS else "unsupported"
             )
 
+    # Last, and offset past everything else: it is the least urgent thing here
+    # and should never be what a scrape queues behind on boot.
+    if DIGITAL_INTERVAL > 0:
+        delay = STARTUP_STAGGER * (len(active) + len(validating)) + 60
+        tasks.append(asyncio.create_task(_digital_loop(delay), name="digital"))
+    else:
+        DIGITAL_STATUS["state"] = "disabled"
+
     log.info(
         "scheduler started for %s (%s), window=%sd, first run %s%s",
         len(active), ", ".join(active), SCRAPE_DAYS,
@@ -429,6 +576,10 @@ def start(tasks: list[asyncio.Task]) -> None:
         VALIDATION_HORIZON_HOURS,
         "; lev has no cheap validation and relies on its full scrape"
         if "lev" not in validating else "",
+    )
+    log.info(
+        "digital release dates: %s",
+        f"every {DIGITAL_INTERVAL // 60}m" if DIGITAL_INTERVAL > 0 else "disabled",
     )
 
 

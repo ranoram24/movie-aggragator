@@ -5,7 +5,7 @@
  * without needing a separate backdrop image the API doesn't have.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useMovie } from '../hooks/useMovie';
@@ -13,6 +13,9 @@ import { ChainFilter } from '../components/ChainFilter';
 import { DubFilter, audioKey, type AudioOption } from '../components/DubFilter';
 import { SearchBar } from '../components/SearchBar';
 import { filterTheatres } from '../api/search';
+import { digitalLabel } from '../api/dates';
+import { CalendarPrompt } from '../components/CalendarPrompt';
+import { downloadIcs, type ScreeningEvent } from '../api/calendar';
 import { languageName } from '../api/language';
 import { PosterImage } from '../components/PosterImage';
 import { TheaterList } from '../components/TheaterList';
@@ -28,6 +31,10 @@ export function MovieDetailScreen() {
   const [chains, setChains] = useState<string[]>([]);
   const [audio, setAudio] = useState<string[]>([]);
   const [city, setCity] = useState('');
+  // The screening a calendar event would be built from, or null when nothing
+  // is being asked. Lives here because this is the only component that knows
+  // the film; the theatre and the time are supplied from below.
+  const [pending, setPending] = useState<ScreeningEvent | null>(null);
 
   // Filtering happens here rather than server-side: the response already holds
   // every theatre, so narrowing is instant and costs no request.
@@ -90,6 +97,16 @@ export function MovieDetailScreen() {
       .filter((theatre) => theatre.dates.length > 0);
   }, [movie, chains, audio, city]);
 
+  // useCallback because CalendarPrompt subscribes to the dialog's close event
+  // with it as a dependency; a new identity each render would tear the
+  // listener down and rebuild it on every keystroke in the city box.
+  const dismiss = useCallback(() => setPending(null), []);
+
+  const saveToCalendar = useCallback(() => {
+    if (pending) downloadIcs(pending);
+    setPending(null);
+  }, [pending]);
+
   const toggleChain = (chain: string) =>
     setChains((current) =>
       current.includes(chain)
@@ -118,6 +135,7 @@ export function MovieDetailScreen() {
     setChains([]);
     setAudio([]);
     setCity('');
+    setPending(null);
   }, [id]);
 
   const facts = movie
@@ -129,6 +147,10 @@ export function MovieDetailScreen() {
         movie.original_language
           ? `שפת מקור: ${languageName(movie.original_language)}`
           : null,
+        // Sits with the other plain facts rather than in its own callout.
+        // Genre, runtime and rating are things that are true about the film;
+        // so is when it reaches digital, and it is presented the same way.
+        digitalLabel(movie.digital_date),
       ].filter((f): f is string => Boolean(f))
     : [];
 
@@ -235,7 +257,23 @@ export function MovieDetailScreen() {
 
             <div className="detail__main">
               {visibleTheatres.length > 0 ? (
-                <TheaterList theatres={visibleTheatres} from={coords} />
+                <TheaterList
+                  theatres={visibleTheatres}
+                  from={coords}
+                  onPicked={(theatre, date, showtime) =>
+                    setPending({
+                      filmTitle: movie.title_he,
+                      cinema: theatre.name,
+                      chain: theatre.chain,
+                      address: theatre.address,
+                      date,
+                      time: showtime.time,
+                      runtimeMinutes: movie.runtime_minutes,
+                      venueType: showtime.venue_type,
+                      ticketUrl: showtime.ticket_url,
+                    })
+                  }
+                />
               ) : (
                 <EmptyState
                   message={
@@ -257,6 +295,11 @@ export function MovieDetailScreen() {
           </div>
         </>
       )}
+
+      {/* Outside the loading/error branches: once it is open it must survive
+          a refetch, and a reload triggered by coming back from the booking
+          tab would otherwise close it mid-question. */}
+      <CalendarPrompt event={pending} onSave={saveToCalendar} onDismiss={dismiss} />
     </div>
   );
 }

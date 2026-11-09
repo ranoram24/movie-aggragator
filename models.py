@@ -16,6 +16,19 @@ class Movie(Base):
     # while dubbed_language is a property of the individual showing.
     original_language=Column(String)
 
+    # Digital release date according to TMDb. A FALLBACK for films the
+    # Telegram channel does not carry, never an override -- see
+    # digital_dates.py for why the channel wins where both have an opinion.
+    #
+    # Separate column rather than merged into digital_releases on purpose:
+    # that table is the channel's data as the channel has it, and mixing a
+    # second source into it would make "what did the channel say" unanswerable.
+    digital_date_tmdb=Column(String)
+    # When TMDb was last asked. Needed because the common answer is "no digital
+    # date yet", which is indistinguishable from "never asked" without it --
+    # and re-asking every film on every pass would be ~200 requests a cycle.
+    digital_tmdb_checked_at=Column(String)
+
 class CinemaSource(Base):
     __tablename__ = "cinema_sources"
 
@@ -109,3 +122,41 @@ class Screening(Base):
     # chain the validator cannot reach never silently empties out.
     is_available = Column(Boolean, nullable=True, default=True)
     last_validated_at = Column(String, nullable=True)   # last checked by validate.py
+
+
+class DigitalRelease(Base):
+    """When a film reaches digital, per the MoviesOnlineDates Telegram channel.
+
+    Keyed by tmdb_id rather than joined to movies.id with a foreign key, and
+    deliberately so: the channel posts a film when its date is announced, which
+    is often before any chain lists it and long after the last one drops it.
+    Storing only the films we currently carry would mean re-scraping the whole
+    history every time a new film appeared. This table is the channel's data as
+    the channel has it, and api_movies joins it to whatever we happen to be
+    showing today.
+
+    Dates are stored ISO (YYYY-MM-DD) though the channel writes DD/MM/YYYY, so
+    they sort and compare like every other date in this schema. NULL means the
+    channel has not given one -- usually because it says "יפורסם בהמשך".
+    """
+    __tablename__ = "digital_releases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # The join key, straight out of the themoviedb.org link in each post.
+    tmdb_id = Column(Integer, unique=True, index=True, nullable=False)
+
+    # Kept for debugging and for the backfill report. Not used for matching --
+    # the whole point of the tmdb id is that titles never have to be compared.
+    title_he = Column(String, nullable=True)
+    title_en = Column(String, nullable=True)
+
+    digital_date = Column(String, nullable=True)        # the field the app shows
+    bluray_date = Column(String, nullable=True)
+    cinema_il_date = Column(String, nullable=True)
+
+    # Which post this came from, and when we last saw it. source_post_id is how
+    # a correction is attributed: the channel edits the original post in place,
+    # so the id stays the same while the dates change under it.
+    source_post_id = Column(Integer, nullable=True)
+    first_seen_at = Column(String, nullable=True)
+    updated_at = Column(String, nullable=True)

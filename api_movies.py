@@ -31,7 +31,8 @@ from sqlalchemy.orm import Session
 import localtime
 from database import SessionLocal
 from titles import normalize_title, title_slug
-from models import CinemaSource, Movie, Screening, SourceMovieListing, Theatre
+from models import (CinemaSource, DigitalRelease, Movie, Screening,
+                    SourceMovieListing, Theatre)
 
 router = APIRouter(prefix="/api", tags=["movies"])
 
@@ -59,6 +60,11 @@ class MovieSummary(BaseModel):
     # automatically. The card shows its chains when this is set, which is what
     # makes an escaped duplicate visible without opening both cards.
     possible_duplicate: bool = False
+    # ISO date this film reaches (or reached) digital in Israel, when the
+    # channel in digital_dates.py has said. Stated, not interpreted: the client
+    # prints the date and draws no conclusion from it, because whether two days
+    # is worth waiting for is the viewer's call and not the app's.
+    digital_date: str | None = None
 
 
 class ShowtimeOut(BaseModel):
@@ -106,6 +112,7 @@ class MovieDetail(BaseModel):
     # The language the film was made in -- a property of the film, unlike a
     # screening's dub language.
     original_language: str | None = None
+    digital_date: str | None = None
     theatres: list[TheatreOut]
 
 
@@ -331,6 +338,50 @@ def _chain_filter(chains: Optional[str]) -> set[str]:
     return {c.strip() for c in chains.split(",") if c.strip()}
 
 
+def digital_dates_by_tmdb(db: Session) -> dict[int, str]:
+    """tmdb_id -> ISO digital release date, from the best source available.
+
+    Two sources, and the order between them is the whole point:
+
+    1. THE TELEGRAM CHANNEL (digital_releases) wins wherever it has a date.
+       It is hand-curated, specifically Israeli, and it corrects itself -- for
+       The Odyssey it says 17/11 where TMDb's Israeli entry says 18/11, and the
+       channel is the one that gets amended when a date moves.
+    2. TMDb (movies.digital_date_tmdb) fills the silence. The channel announces
+       UPCOMING releases, so it says nothing at all about an older film in a
+       re-release -- Shrek has been on digital for twenty years and would
+       otherwise show no date whatsoever, which is the least useful possible
+       answer for the one film where everybody knows it is at home.
+
+    Both are plain dates by the time they get here; the client cannot tell
+    which source a date came from and does not need to. Provenance is kept in
+    the database, where it is debuggable.
+
+    One small query each rather than a join onto the browse query -- that one
+    had to be rewritten for speed once already, and these are a couple of
+    hundred rows against an indexed column.
+    """
+    dates = {
+        movie.tmdb_id: movie.digital_date_tmdb
+        for movie in db.query(Movie)
+        .filter(Movie.tmdb_id.isnot(None))
+        .filter(Movie.digital_date_tmdb.isnot(None))
+        .all()
+    }
+    # Applied second so it overwrites: the channel is the better source.
+    # Rows with no date are skipped rather than written as None, since the
+    # channel publishes a film as soon as its CINEMA date is known and leaves
+    # "יפורסם בהמשך" in the digital slot -- a NULL there means not yet
+    # announced, and must not blank out what TMDb knows.
+    dates.update({
+        row.tmdb_id: row.digital_date
+        for row in db.query(DigitalRelease)
+        .filter(DigitalRelease.digital_date.isnot(None))
+        .all()
+    })
+    return dates
+
+
 def _distance(theatre: Theatre, lat: Optional[float], lon: Optional[float]):
     if lat is None or lon is None or theatre.latitude is None or theatre.longitude is None:
         return None
@@ -361,6 +412,7 @@ def list_movies(
     try:
         films: dict[str, dict] = {}
         canonical = canonical_movie_ids(db)
+        digital = digital_dates_by_tmdb(db)
 
         for listing, theatre, source, movie in _browse_rows(db):
             # Filtering here rather than in SQL keeps theatre_count and
@@ -385,6 +437,12 @@ def list_movies(
                     "possible_duplicate": False,
                     "poster_hash": None,
                     "nearest_km": None,
+                    # Only a TMDb-matched film can have one: the channel is
+                    # joined by tmdb_id, so an unmatched listing simply has no
+                    # key to look up. That is the same ~15% of the catalogue
+                    # that has no English title or synopsis either.
+                    "digital_date": (digital.get(movie.tmdb_id)
+                                     if movie and movie.tmdb_id else None),
                 }
             film["theatres"].add(theatre.id)
             film["chains"].add(source.name or source.key)
@@ -417,6 +475,7 @@ def list_movies(
                 nearest_km=f["nearest_km"],
                 chains=sorted(f["chains"]),
                 possible_duplicate=f["possible_duplicate"],
+                digital_date=f["digital_date"],
             )
             for f in films.values()
         ]
@@ -464,9 +523,11 @@ def movie_detail(
 
         today = localtime.today()
         by_theatre: dict[int, dict] = {}
+        digital = digital_dates_by_tmdb(db)
         meta = {"title_he": None, "title_en": None, "poster_url": None,
                 "overview": None, "genre": None, "runtime_minutes": None,
-                "age_rating": None, "original_language": None}
+                "age_rating": None, "original_language": None,
+                "digital_date": None}
         poster_candidates: list[tuple] = []
         tmdb_poster = None
 
@@ -498,6 +559,8 @@ def movie_detail(
             meta["age_rating"] = meta["age_rating"] or listing.age_rating
             meta["original_language"] = (meta["original_language"]
                                          or (movie.original_language if movie else None))
+            if meta["digital_date"] is None and movie and movie.tmdb_id:
+                meta["digital_date"] = digital.get(movie.tmdb_id)
 
             entry = by_theatre.setdefault(theatre.id, {
                 "id": theatre.id,

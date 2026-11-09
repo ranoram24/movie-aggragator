@@ -1,0 +1,146 @@
+/* The native <dialog> arrives with a white background, a border and centring
+   rules of its own. All of it is replaced. */
+.calprompt {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+  /* The element fills the viewport and lays the panel out, so a click
+     anywhere outside the panel lands on the dialog itself — which is what
+     CalendarPrompt reads as a backdrop click. */
+  display: grid;
+  place-items: end center;
+}
+
+.calprompt::backdrop {
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+/* Bottom sheet on a phone: it is reachable by thumb, and it is the shape
+   people already expect from a question that appears after an action. */
+.calprompt__panel {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 20px var(--gutter) calc(18px + var(--safe-bottom));
+  animation: calprompt-rise 180ms ease-out;
+}
+
+@keyframes calprompt-rise {
+  from { transform: translateY(14px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.calprompt__title {
+  margin: 0 0 14px;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.calprompt__facts {
+  margin: 0 0 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.calprompt__row {
+  display: grid;
+  /* Fixed label column so the three values line up with each other. */
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+
+.calprompt__row dt {
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+.calprompt__row dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.calprompt__chain {
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.calprompt__note {
+  margin: 0 0 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.calprompt__actions {
+  display: grid;
+  gap: 9px;
+}
+
+.calprompt__save,
+.calprompt__skip {
+  min-height: var(--tap-min);
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.calprompt__save {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.calprompt__skip {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* ---- desktop --------------------------------------------------------------
+   A full-width sheet glued to the bottom of a 1440px window is phone layout
+   scaled up. With a cursor it becomes a centred card at a readable width, and
+   the two buttons sit side by side, confirm last in the reading order — which
+   in RTL puts it on the left. */
+@media (min-width: 860px) {
+  .calprompt {
+    place-items: center;
+  }
+
+  .calprompt__panel {
+    width: min(420px, calc(100vw - 48px));
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px 24px 20px;
+    animation: calprompt-pop 150ms ease-out;
+  }
+
+  @keyframes calprompt-pop {
+    from { transform: scale(0.97); opacity: 0; }
+    to   { transform: scale(1);    opacity: 1; }
+  }
+
+  .calprompt__title { font-size: 21px; }
+
+  .calprompt__actions {
+    grid-template-columns: 1fr 1fr;
+    direction: rtl;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .calprompt__save:hover { filter: brightness(1.08); }
+  .calprompt__skip:hover { border-color: var(--text-faint); color: var(--text); }
+}

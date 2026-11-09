@@ -14,11 +14,18 @@
  *  original audio of the same film an hour apart — sometimes at the same minute
  *  in different halls — and they are separate tickets. */
 
-import type { DateGroup } from '../api/types';
+import type { DateGroup, Showtime } from '../api/types';
 import { audioLabel, audioLanguageLabel } from '../api/language';
 import './ShowtimeList.css';
 
-export function ShowtimeList({ group }: { group: DateGroup }) {
+interface Props {
+  group: DateGroup;
+  /** Called after the booking tab opens, with the screening that was picked.
+   *  The navigation is never blocked on it. */
+  onPicked?: (date: string, showtime: Showtime) => void;
+}
+
+export function ShowtimeList({ group, onPicked }: Props) {
   return (
     <div className="showtime-group">
       <h4 className="showtime-group__label">{group.label}</h4>
@@ -45,6 +52,11 @@ export function ShowtimeList({ group }: { group: DateGroup }) {
               rel="noopener noreferrer"
               title={audio ?? undefined}
               aria-label={audio ? `${showtime.time} — ${audio}` : showtime.time}
+              // Deliberately does NOT preventDefault. The link's job is to
+              // open the checkout and that must happen first and
+              // unconditionally -- a calendar prompt is not worth risking a
+              // booking over. This only leaves a question behind in this tab.
+              onClick={() => onPicked?.(group.date, showtime)}
             >
               <span className="showtime-pill__time">{showtime.time}</span>
               {spoken && <span className="showtime-pill__audio">{spoken}</span>}

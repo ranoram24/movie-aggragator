@@ -3,7 +3,7 @@
  *  Distance is not shown — the list is still ordered nearest-first, the
  *  kilometres are just not spelled out. */
 
-import type { Coords, Theatre } from '../api/types';
+import type { Coords, Showtime, Theatre } from '../api/types';
 import { bookingNote } from '../api/booking';
 import { directionsUrl } from '../api/navigation';
 import { ShowtimeList } from './ShowtimeList';
@@ -13,9 +13,13 @@ interface Props {
   theatre: Theatre;
   /** Where to route from. Null lets Maps use the device's own location. */
   from: Coords | null;
+  /** Passed up with this theatre attached. Each layer adds the part it
+   *  knows: the pill knows the time, this knows the cinema, the screen
+   *  knows the film. */
+  onPicked?: (theatre: Theatre, date: string, showtime: Showtime) => void;
 }
 
-export function TheaterCard({ theatre, from }: Props) {
+export function TheaterCard({ theatre, from, onPicked }: Props) {
   const note = bookingNote(theatre.chain);
 
   return (
@@ -50,7 +54,15 @@ export function TheaterCard({ theatre, from }: Props) {
       )}
 
       {theatre.dates.map((group) => (
-        <ShowtimeList key={group.date} group={group} />
+        <ShowtimeList
+          key={group.date}
+          group={group}
+          onPicked={
+            onPicked
+              ? (date, showtime) => onPicked(theatre, date, showtime)
+              : undefined
+          }
+        />
       ))}
     </section>
   );

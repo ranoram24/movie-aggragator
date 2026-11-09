@@ -1,15 +1,16 @@
 /** Every theatre showing this film, already distance-sorted by the API. */
 
-import type { Coords, Theatre } from '../api/types';
+import type { Coords, Showtime, Theatre } from '../api/types';
 import { TheaterCard } from './TheaterCard';
 import './TheaterList.css';
 
 interface Props {
   theatres: Theatre[];
   from: Coords | null;
+  onPicked?: (theatre: Theatre, date: string, showtime: Showtime) => void;
 }
 
-export function TheaterList({ theatres, from }: Props) {
+export function TheaterList({ theatres, from, onPicked }: Props) {
   return (
     <div className="theater-list">
       <h2 className="theater-list__heading">
@@ -17,7 +18,12 @@ export function TheaterList({ theatres, from }: Props) {
         <span className="theater-list__count">{theatres.length}</span>
       </h2>
       {theatres.map((theatre) => (
-        <TheaterCard key={theatre.id} theatre={theatre} from={from} />
+        <TheaterCard
+          key={theatre.id}
+          theatre={theatre}
+          from={from}
+          onPicked={onPicked}
+        />
       ))}
     </div>
   );

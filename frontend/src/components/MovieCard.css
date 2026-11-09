@@ -97,3 +97,21 @@
   .movie-card__title { font-size: 16px; }
   .movie-card__cinemas { font-size: 12.5px; }
 }
+
+/* The digital release date. Same weight as the cinema count, not a badge:
+   anything louder would read as the app telling you to wait, which is exactly
+   the judgement it is refusing to make. One line, clipped like the chain row,
+   so a long date string can never push the title off the poster. */
+.movie-card__digital {
+  margin: 3px 0 0;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 860px) {
+  .movie-card__digital { font-size: 11.5px; }
+}

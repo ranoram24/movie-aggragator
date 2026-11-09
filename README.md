@@ -24,6 +24,11 @@ from the subtitled original. Those are collapsed together, so *Spider-Man* is a
 single card whether it is playing at Planet, Cinema City, or both, dubbed or
 not.
 
+**If you already know what you want, type it.** The search box filters the grid
+as you type, in Hebrew or English, and matches how people actually type rather
+than how the cinemas spell things: word order does not matter, so *אריות מלך*
+finds *מלך האריות*, and the spelling drift between chains does not either.
+
 ## A film
 
 Opening a card gives the poster, synopsis, and the facts worth knowing before
@@ -36,6 +41,14 @@ showing a hundred times:
 
 - **by chain**, if you have a membership or a preferred cinema
 - **by audio language**, to separate the Hebrew dub from the original
+- **by city**, typed in — and it respects the other two, so narrowing to one
+  chain and then typing a city will never show you a different chain's cinema
+  in that city
+
+City search knows the abbreviations the cinemas file their branches under, so
+*ראשון לציון* finds the one listed as *ראשל"צ*, and it searches addresses as
+well as names, which is the only way to find the Tel Aviv cinemas that are named
+after their neighbourhood.
 
 ## Showtimes
 
@@ -51,6 +64,34 @@ marked too, so IMAX, VIP and 4DX are visible before you tap.
 
 Each cinema also has a **נווט לקולנוע** button that opens Google Maps directions
 from where you are to that cinema, by name.
+
+## Putting it in your calendar
+
+Tapping a time opens the checkout in a new tab and leaves a question behind in
+this one: **להוסיף ליומן?** Confirming downloads a calendar file for that exact
+screening — film, cinema, date and time — with a **reminder two hours before**,
+which is roughly when you need to start thinking about leaving.
+
+The event runs for the film's length plus twenty minutes of trailers, so the
+block in your calendar covers the time you are actually in the building rather
+than only the running time.
+
+It works with whatever calendar you use, needs no account, and never blocks the
+booking: the checkout opens first either way, and the question waits for you
+when you come back. Dismissing it is one tap.
+
+## Coming to digital
+
+A film that is not out at home yet says when it will be — *דיגיטל 17/11/2026*.
+One that is already out just says so — *זמין בדיגיטל* — because the date only
+ever answered "how long do I wait", and once a film is available there is
+nothing left to wait for. It sits with the runtime and the age rating, in the
+same quiet type.
+
+That is the whole feature. The app does not tell you a film is about to be
+cheaper at home, does not count down, and does not suggest waiting. Whether two
+days is worth waiting for depends on who is asking, and the app is not the one
+asking. It states the fact; the conclusion is yours.
 
 ## Coverage
 

@@ -71,20 +71,20 @@ Tapping a time opens the checkout in a new tab and leaves a question behind in
 this one: **להוסיף ליומן?** — with that exact screening's film, cinema, date and
 time, and two ways to keep it.
 
-**Google Calendar** is two taps and the event is synced to every device you own.
-**קובץ** downloads a calendar file instead, which is slower but carries a
-**reminder two hours before** — roughly when you need to start thinking about
-leaving. The split is not a design preference: Google's prefill screen has no
-way to set a reminder, so an event added that way gets whatever default your
-account uses. The sheet says so, under the buttons.
+**תזכורת 2 שעות** hands the screening to whatever calendar your phone already
+uses, with a **reminder two hours before** — roughly when you need to start
+thinking about leaving. **Google Calendar** opens a prefilled event in Google
+instead, which syncs everywhere but arrives with whatever default reminder your
+account uses: its prefill screen has no way to set one. The sheet says so,
+under the buttons.
 
 The event runs for the film's length plus twenty minutes of trailers, so the
 block in your calendar covers the time you are actually in the building rather
 than only the running time.
 
-The file route works with whatever calendar you use and needs no account.
 Neither route blocks the booking: the checkout opens first either way, and the
-question waits for you when you come back. Dismissing it is one tap.
+question waits for you when you come back. Dismissing it is one tap, and it
+leaves the page exactly where you were reading.
 
 ## Coming to digital
 

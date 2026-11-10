@@ -1,6 +1,10 @@
 /**
  * Turning a screening into a calendar event.
  *
+ * Two routes out, and the file is built by the server rather than here —
+ * see screeningIcsUrl for why that is the difference between "opens your
+ * calendar" and "appears in your Downloads folder".
+ *
  * ## Why an .ics file and not a Google Calendar link
  *
  * The obvious implementation is a link to calendar.google.com/calendar/render,
@@ -32,8 +36,11 @@
  * the local clock time there. They have also missed the film.
  */
 
-/** Everything an event needs, gathered from the three components that know it. */
+/** Everything the prompt shows, and what the two routes are built from. */
 export interface ScreeningEvent {
+  /** The card's id, as /api/movies returns it — the server resolves the rest. */
+  filmId: string;
+  theatreId: number;
   filmTitle: string;
   cinema: string;
   chain: string;
@@ -44,167 +51,56 @@ export interface ScreeningEvent {
   time: string;
   runtimeMinutes: number | null;
   venueType: string;
+  /** Narrows the server lookup when a cinema runs two versions at one minute. */
+  dubbedLanguage: string | null;
   ticketUrl: string;
 }
 
-/** Hours before the screening that the reminder fires. */
+/** Hours before the screening that the reminder fires. Mirrors calendar_ics.py. */
 export const REMINDER_HOURS = 2;
 
-/**
- * Minutes of trailers and advertising before the feature starts.
- *
- * The listed time is when the session begins, not when the film does, and
- * Israeli cinemas run roughly this long before it. It is added to the runtime
- * rather than the start so the event covers the time you are actually in the
- * building — the question a calendar block answers is "when am I free again".
- */
+/** Minutes of trailers before the feature. Mirrors calendar_ics.py. */
 const ADVERTS_MINUTES = 20;
 
 /** Used when the chain never published a runtime. */
 const FALLBACK_MINUTES = 120;
 
-/**
- * Escape a TEXT value. Backslash first, or the escapes we add get escaped.
- * Film titles genuinely contain commas and semicolons, both of which are
- * value separators in iCalendar.
- */
-function escapeText(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\r?\n/g, '\\n');
-}
-
-/**
- * Fold a content line to 75 octets, per RFC 5545.
- *
- * Measured in BYTES, not characters, which is why this cannot be a simple
- * slice: Hebrew is two bytes per letter in UTF-8, so a title in Hebrew reaches
- * the limit in half the characters an English one would, and splitting by
- * character count would either fold too late or cut a letter in half. Iterating
- * by code point and measuring each one keeps multi-byte characters whole.
- */
-function fold(line: string): string {
-  const encoder = new TextEncoder();
-  if (encoder.encode(line).length <= 75) return line;
-
-  const parts: string[] = [];
-  let current = '';
-  let bytes = 0;
-  for (const char of line) {
-    const size = encoder.encode(char).length;
-    // A continuation line begins with a space, which counts toward its 75.
-    const limit = parts.length === 0 ? 75 : 74;
-    if (bytes + size > limit) {
-      parts.push(current);
-      current = '';
-      bytes = 0;
-    }
-    current += char;
-    bytes += size;
-  }
-  if (current) parts.push(current);
-  return parts.join('\r\n ');
-}
-
-/** "2026-11-12" + "20:20" -> "20261112T202000" (floating, see the header). */
-function localStamp(date: string, time: string): string {
-  return `${date.replace(/-/g, '')}T${time.replace(':', '')}00`;
-}
-
-/**
- * Add minutes to a local date/time, returning the same floating format.
- *
- * Arithmetic goes through Date.UTC on purpose. These are floating times with
- * no zone, and doing the sum with a local-timezone Date would let the running
- * device's own DST transition shift a result that has nothing to do with it.
- */
-function addMinutes(date: string, time: string, minutes: number): string {
-  const [year, month, day] = date.split('-').map(Number);
-  const [hour, minute] = time.split(':').map(Number);
-  const moment = new Date(Date.UTC(year, month - 1, day, hour, minute) + minutes * 60_000);
-
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return (
-    `${moment.getUTCFullYear()}${pad(moment.getUTCMonth() + 1)}${pad(moment.getUTCDate())}` +
-    `T${pad(moment.getUTCHours())}${pad(moment.getUTCMinutes())}00`
-  );
-}
-
-/** FNV-1a, for a short stable id. Not security; just needs to not collide. */
-function hash(value: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < value.length; i += 1) {
-    h ^= value.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, '0');
-}
-
-/** UTC timestamp for DTSTAMP, which must be absolute. */
-function utcStamp(at: Date): string {
-  return `${at.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`;
-}
-
-/** How long to block out: the feature plus the adverts in front of it. */
+/** How long the event blocks out. Shown in the prompt before you commit. */
 export function durationMinutes(runtimeMinutes: number | null): number {
   return runtimeMinutes && runtimeMinutes > 0
     ? runtimeMinutes + ADVERTS_MINUTES
     : FALLBACK_MINUTES;
 }
 
+/** "2026-11-12" + "20:20" -> "2026-11-12T20:20:00", as the API stores it. */
+function showtimeIso(date: string, time: string): string {
+  return `${date}T${time}:00`;
+}
+
 /**
- * The whole .ics document for one screening.
+ * The URL of this screening's calendar file.
  *
- * Pure, so it is testable without a DOM — see frontend/tests/calendar.test.ts.
- * `now` is injectable for the same reason.
+ * A link, not a download. The file used to be assembled here and handed over
+ * as a Blob with a download attribute, and a blob + download is ALWAYS a file
+ * save: on a phone it lands in Downloads and has to be found, tapped and
+ * opened with something before a calendar ever sees it. Served from this URL
+ * as text/calendar with an inline disposition, the browser treats it as a
+ * document and hands it to whatever app claims the type — on Android, the
+ * calendar's own import screen.
+ *
+ * Only ids go in the query string. The event's text — title, cinema, address,
+ * runtime, ticket link — is read from the database by the endpoint, so nothing
+ * typed into a URL can end up inside a calendar entry. See api_calendar.py.
  */
-export function buildIcs(event: ScreeningEvent, now: Date = new Date()): string {
-  const start = localStamp(event.date, event.time);
-  const end = addMinutes(event.date, event.time, durationMinutes(event.runtimeMinutes));
-
-  const summary = `${event.filmTitle} — ${event.cinema}`;
-  const location = event.address ? `${event.cinema}, ${event.address}` : event.cinema;
-
-  const description = [
-    event.chain,
-    event.venueType !== 'regular' ? event.venueType : null,
-    event.ticketUrl,
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  // Deterministic, so re-adding the same screening updates the existing event
-  // in clients that honour UID rather than creating a second one.
-  const uid = `${start}-${hash(event.ticketUrl)}@on-cinema-now.fly.dev`;
-
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//On Cinema//Screenings//HE',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-    'BEGIN:VEVENT',
-    `UID:${uid}`,
-    `DTSTAMP:${utcStamp(now)}`,
-    `DTSTART:${start}`,
-    `DTEND:${end}`,
-    `SUMMARY:${escapeText(summary)}`,
-    `LOCATION:${escapeText(location)}`,
-    `DESCRIPTION:${escapeText(description)}`,
-    'BEGIN:VALARM',
-    // The reason this is a file and not a Google Calendar link.
-    `TRIGGER:-PT${REMINDER_HOURS}H`,
-    'ACTION:DISPLAY',
-    `DESCRIPTION:${escapeText(summary)}`,
-    'END:VALARM',
-    'END:VEVENT',
-    'END:VCALENDAR',
-  ];
-
-  // CRLF is required by the spec, and some clients genuinely reject LF-only.
-  return `${lines.map(fold).join('\r\n')}\r\n`;
+export function screeningIcsUrl(event: ScreeningEvent): string {
+  const params = new URLSearchParams({
+    film: event.filmId,
+    theatre: String(event.theatreId),
+    at: showtimeIso(event.date, event.time),
+    venue_type: event.venueType,
+  });
+  if (event.dubbedLanguage) params.set('dub', event.dubbedLanguage);
+  return `/api/screening.ics?${params.toString()}`;
 }
 
 /**
@@ -217,8 +113,8 @@ export function buildIcs(event: ScreeningEvent, now: Date = new Date()): string 
  * a time range, a location, a description, a timezone, guests and a recurrence
  * rule — and has no parameter for an alarm of any kind. An event created this
  * way gets whatever default notification the account is configured with,
- * typically ten or thirty minutes. That is why downloadIcs still exists beside
- * this: the file is the only one of the two that can carry TRIGGER:-PT2H.
+ * typically ten or thirty minutes. That is why the file route exists beside
+ * this: it is the only one of the two that can carry TRIGGER:-PT2H.
  *
  * The timezone IS handled properly here, better than in the file. Passing
  * naive times plus ctz=Asia/Jerusalem makes Google resolve the offset for the
@@ -240,8 +136,23 @@ export function buildIcs(event: ScreeningEvent, now: Date = new Date()): string 
  * first: that one does not depend on how somebody else's app routes a link.
  */
 export function googleCalendarUrl(event: ScreeningEvent): string {
-  const start = localStamp(event.date, event.time);
-  const end = addMinutes(event.date, event.time, durationMinutes(event.runtimeMinutes));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = (date: string, time: string, addMinutes = 0) => {
+    const [year, month, day] = date.split('-').map(Number);
+    const [hour, minute] = time.split(':').map(Number);
+    // Through Date.UTC on purpose: these are naive times that Google will
+    // resolve with ctz, and doing the sum in the running device's own timezone
+    // would let ITS dst transition shift a result that has nothing to do
+    // with it.
+    const m = new Date(Date.UTC(year, month - 1, day, hour, minute) + addMinutes * 60_000);
+    return (
+      `${m.getUTCFullYear()}${pad(m.getUTCMonth() + 1)}${pad(m.getUTCDate())}` +
+      `T${pad(m.getUTCHours())}${pad(m.getUTCMinutes())}00`
+    );
+  };
+
+  const start = stamp(event.date, event.time);
+  const end = stamp(event.date, event.time, durationMinutes(event.runtimeMinutes));
 
   const params = new URLSearchParams({
     action: 'TEMPLATE',
@@ -259,37 +170,4 @@ export function googleCalendarUrl(event: ScreeningEvent): string {
   });
 
   return `https://calendar.google.com/calendar/u/0/r/eventedit?${params.toString()}`;
-}
-
-/** A filename that will not upset a filesystem, derived from the film. */
-export function icsFilename(event: ScreeningEvent): string {
-  const slug = `${event.filmTitle}-${event.date}-${event.time}`
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-|-$/g, '');
-  return `${slug || 'screening'}.ics`;
-}
-
-/**
- * Hand the file to the browser.
- *
- * A Blob and a synthetic click, which is what makes the phone offer to open it
- * in the calendar app. The object URL is revoked on a timer rather than
- * immediately: Safari reads it asynchronously after the click returns, and
- * revoking straight away produces a silently empty download.
- */
-export function downloadIcs(event: ScreeningEvent): void {
-  const blob = new Blob([buildIcs(event)], {
-    type: 'text/calendar;charset=utf-8',
-  });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = icsFilename(event);
-  link.rel = 'noopener';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }

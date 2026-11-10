@@ -15,7 +15,7 @@ import { SearchBar } from '../components/SearchBar';
 import { filterTheatres } from '../api/search';
 import { digitalLabel } from '../api/dates';
 import { CalendarPrompt } from '../components/CalendarPrompt';
-import { downloadIcs, type ScreeningEvent } from '../api/calendar';
+import type { ScreeningEvent } from '../api/calendar';
 import { languageName } from '../api/language';
 import { PosterImage } from '../components/PosterImage';
 import { TheaterList } from '../components/TheaterList';
@@ -102,10 +102,9 @@ export function MovieDetailScreen() {
   // listener down and rebuild it on every keystroke in the city box.
   const dismiss = useCallback(() => setPending(null), []);
 
-  const saveToCalendar = useCallback(() => {
-    if (pending) downloadIcs(pending);
-    setPending(null);
-  }, [pending]);
+  // The file button is a real link now, so following it is the browser's job;
+  // this only closes the prompt behind it.
+  const saveToCalendar = useCallback(() => setPending(null), []);
 
   const toggleChain = (chain: string) =>
     setChains((current) =>
@@ -262,6 +261,8 @@ export function MovieDetailScreen() {
                   from={coords}
                   onPicked={(theatre, date, showtime) =>
                     setPending({
+                      filmId: movie.id,
+                      theatreId: theatre.id,
                       filmTitle: movie.title_he,
                       cinema: theatre.name,
                       chain: theatre.chain,
@@ -270,6 +271,7 @@ export function MovieDetailScreen() {
                       time: showtime.time,
                       runtimeMinutes: movie.runtime_minutes,
                       venueType: showtime.venue_type,
+                      dubbedLanguage: showtime.dubbed_language,
                       ticketUrl: showtime.ticket_url,
                     })
                   }

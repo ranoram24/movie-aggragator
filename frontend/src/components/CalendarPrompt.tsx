@@ -26,6 +26,7 @@ import {
   REMINDER_HOURS,
   durationMinutes,
   googleCalendarUrl,
+  screeningIcsUrl,
   type ScreeningEvent,
 } from '../api/calendar';
 import './CalendarPrompt.css';
@@ -33,7 +34,7 @@ import './CalendarPrompt.css';
 interface Props {
   /** The screening to offer, or null when there is nothing to ask about. */
   event: ScreeningEvent | null;
-  /** Downloads the .ics — the route that carries the reminder. */
+  /** Called once the file link has been followed, to close the prompt. */
   onSave: () => void;
   onDismiss: () => void;
 }
@@ -46,7 +47,7 @@ function whenLabel(date: string, time: string): string {
 
 export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
-  const saveRef = useRef<HTMLButtonElement>(null);
+  const saveRef = useRef<HTMLAnchorElement>(null);
 
   // Open and close follow `event`, which is the single source of truth. The
   // dialog's own `close` event is deliberately NOT part of this.
@@ -155,14 +156,17 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
         </p>
 
         <div className="calprompt__actions">
-          <button
-            type="button"
+          {/* A plain link to a text/calendar URL, not a generated download.
+              That is what lets the phone hand it to the calendar app instead
+              of parking it in Downloads — see screeningIcsUrl. */}
+          <a
             className="calprompt__save pressable"
+            href={screeningIcsUrl(event)}
             onClick={onSave}
             ref={saveRef}
           >
-            קובץ · תזכורת {REMINDER_HOURS} שעות
-          </button>
+            תזכורת {REMINDER_HOURS} שעות
+          </a>
           {/* Second, because it is the one that depends on how someone
               else's app chooses to route a link — and on Android that has
               already gone wrong once. */}

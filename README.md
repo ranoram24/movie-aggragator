@@ -71,12 +71,15 @@ Tapping a time opens the checkout in a new tab and leaves a question behind in
 this one: **להוסיף ליומן?** — with that exact screening's film, cinema, date and
 time, and two ways to keep it.
 
-**תזכורת 2 שעות** hands the screening to whatever calendar your phone already
-uses, with a **reminder two hours before** — roughly when you need to start
-thinking about leaving. **Google Calendar** opens a prefilled event in Google
-instead, which syncs everywhere but arrives with whatever default reminder your
-account uses: its prefill screen has no way to set one. The sheet says so,
-under the buttons.
+On a phone, **פתיחת היומן** opens your own calendar app on a new event, already
+filled in — no file, no download, no "open with". **קובץ** gets you the same
+event as a calendar file instead, which is slower but is the only route that
+carries a **reminder two hours before**, roughly when you need to start
+thinking about leaving. Android's create-event intent has no way to express an
+alarm, so that trade is real; the sheet says so under the buttons.
+
+On a computer there is one button, because the file simply opens in whatever
+calendar you already use.
 
 The event runs for the film's length plus twenty minutes of trailers, so the
 block in your calendar covers the time you are actually in the building rather

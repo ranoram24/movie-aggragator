@@ -13,13 +13,17 @@
  *   land inside a calendar entry. If someone later "simplifies" this by
  *   passing the event's text in the query string, these assertions fail.
  *
- * The Google route keeps its own tests because it is the opposite case: there
- * the text IS the interface, and the one thing it cannot express is the alarm.
+ * The intent route is the opposite case and keeps its own tests: there the
+ * text IS the interface, carried as extras in a URI whose own separators are
+ * ';' and '=' — characters that appear in real film titles. The one thing it
+ * cannot express is the alarm, which is why the file route survives alongside
+ * it rather than being replaced by it.
  */
 
 import {
+  calendarIntentUrl,
   durationMinutes,
-  googleCalendarUrl,
+  isAndroid,
   screeningIcsUrl,
   type ScreeningEvent,
 } from '../src/api/calendar.ts';
@@ -82,49 +86,64 @@ for (const word of ['האודיסאה', 'סינמה סיטי נתניה', 'Cinem
 }
 check('no title parameter at all', !icsParams.has('text') && !icsParams.has('title'));
 
-// ---- the Google Calendar route -------------------------------------------
+// ---- the Android intent route --------------------------------------------
 
-const gcal = new URL(googleCalendarUrl(BASE));
-const q = gcal.searchParams;
+const FALLBACK = 'https://on-cinema-now.fly.dev/api/screening.ics?film=m1368337';
+const intent = calendarIntentUrl(BASE, FALLBACK);
 
-eq('points at Google Calendar', gcal.host, 'calendar.google.com');
-// The editor route, not /render. The Android app intercepts /render and
-// handles it by jumping to the date and dropping every other parameter, which
-// is what it did on a real phone: the app opened on the screening's day with
-// no event at all.
-eq('uses the event editor route', gcal.pathname, '/calendar/u/0/r/eventedit');
-check('is not the /render route the app swallows',
-  !gcal.pathname.includes('/render'));
-eq('asks for a new event', q.get('action'), 'TEMPLATE');
-eq('carries the same window as the file', q.get('dates'),
-  '20261112T202000/20261112T231000');
+check('is an intent url', intent.startsWith('intent://'));
+check('asks Android to create an event',
+  intent.includes('action=android.intent.action.INSERT'));
+check('targets the calendar events type',
+  intent.includes('type=vnd.android.cursor.dir/event'));
+check('is terminated', intent.endsWith(';end'));
+
+/** An extra's value, decoded. */
+function extra(key: string): string | null {
+  const m = intent.match(new RegExp(`(?:^|;)(?:S|l)\.${key}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 check('titles with the film and the cinema',
-  (q.get('text') ?? '').includes('האודיסאה')
-  && (q.get('text') ?? '').includes('סינמה סיטי נתניה'));
-check('carries the address', (q.get('location') ?? '').includes('המחקר 3'));
+  (extra('title') ?? '').includes('האודיסאה')
+  && (extra('title') ?? '').includes('סינמה סיטי נתניה'));
+check('carries the address', (extra('eventLocation') ?? '').includes('המחקר 3'));
 check('links back to the booking',
-  (q.get('details') ?? '').includes('tickets.cinema-city.co.il'));
+  (extra('description') ?? '').includes('tickets.cinema-city.co.il'));
+eq('falls back to the file if nothing handles it',
+  extra('browser_fallback_url'), FALLBACK);
 
-// Google resolves the offset itself from a zone name, which is the one thing
-// this route does BETTER than the file — the .ics has to leave time floating
-// because a VTIMEZONE block would be needed to say this properly.
-eq('names the timezone rather than guessing an offset',
-  q.get('ctz'), 'Asia/Jerusalem');
-check('the times are naive, for ctz to interpret',
-  !(q.get('dates') ?? '').includes('Z'));
+// Real epoch millis, not a wall clock — an intent extra is an instant. The
+// window must still be the same length as the file's.
+const begin = Number(extra('beginTime'));
+const end = Number(extra('endTime'));
+check('beginTime is epoch millis', Number.isFinite(begin) && begin > 1e12);
+eq('the window matches the duration shown',
+  (end - begin) / 60_000, durationMinutes(BASE.runtimeMinutes));
+eq('and begins at the advertised local time',
+  new Date(begin).getHours() * 60 + new Date(begin).getMinutes(), 20 * 60 + 20);
 
-// Hebrew and separators have to survive the query string intact.
-check('hebrew round-trips through the URL',
-  new URL(googleCalendarUrl({ ...BASE, filmTitle: 'מואנה, הסרט' }))
-    .searchParams.get('text')?.includes('מואנה, הסרט') === true);
+// ';' and '=' end an extra in this syntax, so an unencoded one in a title
+// would truncate the event and silently drop everything after it.
+const awkward = calendarIntentUrl(
+  { ...BASE, filmTitle: 'מואנה; הסרט=המלא', cinema: 'קולנוע; תל אביב' },
+  FALLBACK,
+);
+check('separators inside values are encoded',
+  !awkward.split('S.title=')[1].split(';')[0].includes('='));
+check('every extra still present after an awkward title',
+  ['S.title=', 'S.eventLocation=', 'S.description=', 'l.beginTime=', 'l.endTime=']
+    .every((k) => awkward.includes(k)));
+check('and it is still terminated', awkward.endsWith(';end'));
 
-// The documented gap, asserted so nobody later assumes it was handled.
-check('no reminder parameter exists to set',
-  !['reminder', 'reminders', 'alarm', 'notification']
-    .some((key) => q.has(key)));
+// ---- platform ------------------------------------------------------------
 
-// The filename moved to the server with the file itself — it is a
-// Content-Disposition header now, asserted in test_calendar_ics.py.
+check('android phone is detected',
+  isAndroid('Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 Chrome/152'));
+check('desktop is not',
+  !isAndroid('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152'));
+check('iphone is not — intent:// is a Chrome on Android scheme',
+  !isAndroid('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Version/18.0 Mobile Safari'));
 
 // ---- report --------------------------------------------------------------
 

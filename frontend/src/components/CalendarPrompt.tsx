@@ -24,8 +24,9 @@
 import { useEffect, useRef } from 'react';
 import {
   REMINDER_HOURS,
+  calendarIntentUrl,
   durationMinutes,
-  googleCalendarUrl,
+  isAndroid,
   screeningIcsUrl,
   type ScreeningEvent,
 } from '../api/calendar';
@@ -47,7 +48,7 @@ function whenLabel(date: string, time: string): string {
 
 export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
-  const saveRef = useRef<HTMLAnchorElement>(null);
+  const primaryRef = useRef<HTMLAnchorElement>(null);
 
   // Open and close follow `event`, which is the single source of truth. The
   // dialog's own `close` event is deliberately NOT part of this.
@@ -89,7 +90,7 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
     // thousand pixel page the moment it does not, since this element is the
     // last child of the screen. preventScroll removes that failure mode
     // rather than relying on the top layer always working.
-    saveRef.current?.focus({ preventScroll: true });
+    primaryRef.current?.focus({ preventScroll: true });
 
     return () => {
       if (dialog.open) dialog.close();
@@ -106,6 +107,8 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
   if (!event) return null;
 
   const minutes = durationMinutes(event.runtimeMinutes);
+  const android = isAndroid(navigator.userAgent);
+  const icsUrl = screeningIcsUrl(event);
 
   return (
     <dialog
@@ -156,38 +159,41 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
         </p>
 
         <div className="calprompt__actions">
-          {/* A plain link to a text/calendar URL, not a generated download.
-              That is what lets the phone hand it to the calendar app instead
-              of parking it in Downloads — see screeningIcsUrl. */}
+          {/* On Android the first button is an intent, which opens whatever
+              calendar the person actually uses on a new event — no file, no
+              download bar, no "open with". Everywhere else that route does not
+              exist, so the file IS the primary action and there is only one
+              button. */}
+          {android && (
+            <a
+              className="calprompt__open pressable"
+              href={calendarIntentUrl(event, new URL(icsUrl, window.location.origin).toString())}
+              onClick={onSave}
+              ref={primaryRef}
+            >
+              פתיחת היומן
+            </a>
+          )}
+
+          {/* A plain link to a text/calendar URL. On a desktop it opens in the
+              default calendar app; on Android it lands in Downloads, which is
+              the cost of being the only route that carries the reminder. */}
           <a
             className="calprompt__save pressable"
-            href={screeningIcsUrl(event)}
+            href={icsUrl}
             onClick={onSave}
-            ref={saveRef}
+            ref={android ? undefined : primaryRef}
           >
-            תזכורת {REMINDER_HOURS} שעות
-          </a>
-          {/* Second, because it is the one that depends on how someone
-              else's app chooses to route a link — and on Android that has
-              already gone wrong once. */}
-          <a
-            className="calprompt__google pressable"
-            href={googleCalendarUrl(event)}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={onDismiss}
-          >
-            Google Calendar
+            {android ? `קובץ · תזכורת ${REMINDER_HOURS} שעות` : `הוספה ליומן · תזכורת ${REMINDER_HOURS} שעות`}
           </a>
         </div>
 
-        {/* The difference between the two, in one line, because it is not
-            guessable and it is the only reason to pick the slower one.
-            Google's prefill interface has no parameter for an alarm, so an
-            event made that way gets the account's default notification. */}
-        <p className="calprompt__hint">
-          ב-Google התזכורת היא ברירת המחדל שלך · בקובץ היא {REMINDER_HOURS} שעות
-        </p>
+        {/* Only worth saying where there is a choice to make. */}
+        {android && (
+          <p className="calprompt__hint">
+            פתיחת היומן מהירה יותר · הקובץ הוא היחיד שמביא תזכורת {REMINDER_HOURS} שעות
+          </p>
+        )}
 
         <button
           type="button"

@@ -187,6 +187,13 @@ const gcal = new URL(googleCalendarUrl(BASE));
 const q = gcal.searchParams;
 
 eq('points at Google Calendar', gcal.host, 'calendar.google.com');
+// The editor route, not /render. The Android app intercepts /render and
+// handles it by jumping to the date and dropping every other parameter, which
+// is what it did on a real phone: the app opened on the screening's day with
+// no event at all.
+eq('uses the event editor route', gcal.pathname, '/calendar/u/0/r/eventedit');
+check('is not the /render route the app swallows',
+  !gcal.pathname.includes('/render'));
 eq('asks for a new event', q.get('action'), 'TEMPLATE');
 eq('carries the same window as the file', q.get('dates'),
   '20261112T202000/20261112T231000');

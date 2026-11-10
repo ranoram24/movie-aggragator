@@ -46,6 +46,7 @@ function whenLabel(date: string, time: string): string {
 
 export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
+  const saveRef = useRef<HTMLButtonElement>(null);
 
   // Open and close follow `event`, which is the single source of truth. The
   // dialog's own `close` event is deliberately NOT part of this.
@@ -65,9 +66,39 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
     // Null whenever `event` is null, since the component renders nothing then.
     if (!dialog) return;
 
-    if (!dialog.open) dialog.showModal();
+    // Where the reader was. Restored on close — see below for why.
+    const scrollTop = window.scrollY;
+
+    if (!dialog.open) {
+      try {
+        dialog.showModal();
+      } catch {
+        // showModal throws if the dialog is already open, and on anything
+        // that does not support the top layer. Falling back to a non-modal
+        // open at least shows the panel instead of silently swallowing the
+        // prompt.
+        dialog.open = true;
+      }
+    }
+
+    // Focused here rather than with autoFocus, and with preventScroll.
+    // React's autoFocus calls focus() plainly, and a plain focus() scrolls
+    // the focused element into view — which is harmless while the dialog
+    // sits in the top layer, and is a jump to the very end of a seventeen
+    // thousand pixel page the moment it does not, since this element is the
+    // last child of the screen. preventScroll removes that failure mode
+    // rather than relying on the top layer always working.
+    saveRef.current?.focus({ preventScroll: true });
+
     return () => {
       if (dialog.open) dialog.close();
+      // Closing a modal returns focus to whatever opened it — the showtime
+      // link, far up the page — and the browser scrolls that back into view.
+      // Combined with a list that may have re-sorted while the booking tab
+      // was in front, that is how dismissing the prompt could leave someone
+      // reading a different cinema than the one they tapped. Putting the
+      // scroll position back makes the prompt a no-op for the page behind it.
+      window.scrollTo({ top: scrollTop, behavior: 'instant' });
     };
   }, [event]);
 
@@ -124,8 +155,17 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
         </p>
 
         <div className="calprompt__actions">
-          {/* Google first: for most people it is two taps and the event is
-              already synced to every device. */}
+          <button
+            type="button"
+            className="calprompt__save pressable"
+            onClick={onSave}
+            ref={saveRef}
+          >
+            קובץ · תזכורת {REMINDER_HOURS} שעות
+          </button>
+          {/* Second, because it is the one that depends on how someone
+              else's app chooses to route a link — and on Android that has
+              already gone wrong once. */}
           <a
             className="calprompt__google pressable"
             href={googleCalendarUrl(event)}
@@ -135,15 +175,6 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
           >
             Google Calendar
           </a>
-
-          <button
-            type="button"
-            className="calprompt__save pressable"
-            onClick={onSave}
-            autoFocus
-          >
-            קובץ · תזכורת {REMINDER_HOURS} שעות
-          </button>
         </div>
 
         {/* The difference between the two, in one line, because it is not

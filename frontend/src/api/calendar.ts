@@ -224,6 +224,20 @@ export function buildIcs(event: ScreeningEvent, now: Date = new Date()): string 
  * naive times plus ctz=Asia/Jerusalem makes Google resolve the offset for the
  * screening's own date, DST included, which is exactly what the .ics has to
  * leave floating.
+ *
+ * ## /r/eventedit rather than /render
+ *
+ * Both are prefill entry points and /render is the one usually quoted. On a
+ * phone it is the wrong one: the Google Calendar Android app registers itself
+ * for calendar.google.com links, intercepts /render, and handles it by jumping
+ * the grid to the date and discarding every other parameter. Reported from a
+ * real device — the app opened on the screening's day with no event and no
+ * composer, which looks exactly like the feature being broken.
+ *
+ * /r/eventedit is the editor's own route and is the one the app understands as
+ * "open a new event with these fields". It is still a Google interface we do
+ * not control, which is the honest reason the file route stays and is listed
+ * first: that one does not depend on how somebody else's app routes a link.
  */
 export function googleCalendarUrl(event: ScreeningEvent): string {
   const start = localStamp(event.date, event.time);
@@ -244,7 +258,7 @@ export function googleCalendarUrl(event: ScreeningEvent): string {
     ctz: 'Asia/Jerusalem',
   });
 
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  return `https://calendar.google.com/calendar/u/0/r/eventedit?${params.toString()}`;
 }
 
 /** A filename that will not upset a filesystem, derived from the film. */

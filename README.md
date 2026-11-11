@@ -71,22 +71,18 @@ Tapping a time opens the checkout in a new tab and leaves a question behind in
 this one: **להוסיף ליומן?** — with that exact screening's film, cinema, date and
 time, and two ways to keep it.
 
-The first button opens a calendar on a new event, already filled in, and never
-downloads anything. In Chrome, Samsung Internet or Edge on Android it is
-**פתיחת היומן** and opens whichever calendar app you actually use; everywhere
-else — Firefox, iPhone, a computer — it is **Google Calendar**, because the
-Android intent that reaches your own app is a Chromium feature that other
-browsers cannot follow.
+One button: **הוספה ליומן**. It always produces the same calendar event, with
+a **reminder two hours before** — roughly when you need to start thinking about
+leaving — and an event length covering the film plus twenty minutes of
+trailers, so the block in your calendar matches the time you are actually in
+the building.
 
-**קובץ** gets the same event as a calendar file. It is slower, and on a phone
-it lands in Downloads, but it is the only route that carries a **reminder two
-hours before** — roughly when you need to start thinking about leaving. Neither
-the Android intent nor Google's prefill screen can express an alarm, so that
-trade is real, and the sheet says which is which under the buttons.
-
-The event runs for the film's length plus twenty minutes of trailers, so the
-block in your calendar covers the time you are actually in the building rather
-than only the running time.
+What differs is how the phone handles it. In Chrome, Samsung Internet or Edge
+on Android the app is asked to open the file directly, so your calendar comes
+up on the new event. Firefox, iPhone and computers get the file itself, which
+opens in your calendar on a desktop and lands in Downloads on a phone. That gap
+is not a design choice: no web page can hand a file to another app without the
+browser's cooperation, and only Chromium offers a way to ask.
 
 Neither route blocks the booking: the checkout opens first either way, and the
 question waits for you when you come back. Dismissing it is one tap, and it

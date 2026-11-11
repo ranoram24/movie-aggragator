@@ -84,18 +84,6 @@
   color: var(--text-dim);
 }
 
-.calprompt__actions {
-  /* Two side by side on Android, where there is a real choice between speed
-     and the reminder. One full-width button everywhere else, where the file
-     is simply the way to do it — auto-fit rather than a fixed pair, so the
-     single case does not leave a hole. */
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  gap: 9px;
-}
-
-.calprompt__open,
 .calprompt__save,
 .calprompt__skip {
   display: grid;
@@ -109,37 +97,15 @@
   line-height: 1.25;
 }
 
-/* The fast route leads, so it carries the accent. */
-.calprompt__open {
-  background: var(--accent);
-  color: var(--accent-ink);
-}
-
-/* When it is the only button it is the primary one, so it takes the accent
-   instead; beside the intent button it is the quieter second choice. */
 .calprompt__save {
+  width: 100%;
   background: var(--accent);
   color: var(--accent-ink);
-}
-
-.calprompt__open ~ .calprompt__save {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  color: var(--text);
-}
-
-/* Sets the two apart in one line. Deliberately below the buttons rather than
-   above: it is only read by someone already deciding between them. */
-.calprompt__hint {
-  margin: 10px 0 14px;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--text-faint);
-  text-align: center;
 }
 
 .calprompt__skip {
   width: 100%;
+  margin-top: 9px;
   background: none;
   border: none;
   color: var(--text-faint);
@@ -175,7 +141,6 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .calprompt__open:hover,
   .calprompt__save:hover { filter: brightness(1.08); }
   .calprompt__skip:hover { color: var(--text); }
 }

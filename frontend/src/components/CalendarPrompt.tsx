@@ -2,32 +2,45 @@
  *
  *  ## When it appears
  *
- *  Tapping a showtime opens the chain's checkout in a new tab, which means
- *  this tab is left sitting there doing nothing — and it is the only moment
- *  when the app knows exactly which screening you are committing to. So the
- *  question is asked here, right then, rather than needing a second button
- *  nobody would press.
+ *  Tapping a showtime opens the chain's checkout in a new tab, which leaves
+ *  this tab doing nothing — and it is the only moment when the app knows
+ *  exactly which screening you are committing to. So the question is asked
+ *  then, rather than needing a second button nobody would press. Nothing is
+ *  blocked by it: the booking tab opens either way.
  *
- *  Nothing is blocked by it. The booking tab opens either way; this is a
- *  question waiting behind it when you come back, and dismissing it costs one
- *  tap or the Escape key.
+ *  ## The dialog element is never unmounted
  *
- *  ## Why <dialog>
+ *  It is rendered always and only its CONTENTS are conditional. That is the
+ *  important structural detail here, and it was wrong at first.
  *
- *  The native element, not a hand-rolled overlay. It gives focus trapping,
- *  Escape-to-close, inertness of the page behind it and a ::backdrop for free
- *  — all things a div would have to reimplement, and all things that are
- *  quietly broken in most hand-rolled modals. showModal() has to be called
- *  imperatively, which is the one piece of ceremony it costs.
+ *  The obvious shape — `if (!event) return null` — unmounts an OPEN modal
+ *  dialog, and a modal dialog is not an ordinary element: it lives in the top
+ *  layer, and the document behind it is inert while it is there. useEffect
+ *  cleanup is a PASSIVE effect, so it runs after React has already detached
+ *  the node, which means close() is called on an element the browser no longer
+ *  has and the top layer is left to be cleaned up implicitly. That is
+ *  invisible on a desktop and was reported from a real phone as the page going
+ *  dead after dismissing — stale content, nothing responding, a long blank
+ *  stretch where the rest of the list should be.
+ *
+ *  Keeping the element mounted means the browser owns open and close on a
+ *  stable node, which is the thing it is designed for.
+ *
+ *  ## Dismissal does not use the `close` event
+ *
+ *  Every route out — the button, Escape, the backdrop — calls onDismiss
+ *  directly. The dialog's own `close` event was tried as a single funnel and
+ *  never observed firing, in this app or for a bare dialog created and closed
+ *  in a console. Whether that was the browser or the harness around it was
+ *  never settled, and it does not matter: a dismissal that silently fails to
+ *  clear the parent's state is too quiet a failure to build on.
  */
 
 import { useEffect, useRef } from 'react';
 import {
   REMINDER_HOURS,
+  addToCalendarUrl,
   durationMinutes,
-  openCalendarUrl,
-  screeningIcsUrl,
-  supportsIntentUrls,
   type ScreeningEvent,
 } from '../api/calendar';
 import './CalendarPrompt.css';
@@ -35,7 +48,7 @@ import './CalendarPrompt.css';
 interface Props {
   /** The screening to offer, or null when there is nothing to ask about. */
   event: ScreeningEvent | null;
-  /** Called once the file link has been followed, to close the prompt. */
+  /** Called once the calendar link has been followed, to close the prompt. */
   onSave: () => void;
   onDismiss: () => void;
 }
@@ -48,71 +61,52 @@ function whenLabel(date: string, time: string): string {
 
 export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
-  const primaryRef = useRef<HTMLAnchorElement>(null);
+  const saveRef = useRef<HTMLAnchorElement>(null);
 
-  // Open and close follow `event`, which is the single source of truth. The
-  // dialog's own `close` event is deliberately NOT part of this.
-  //
-  // The first version routed every dismissal through that event, on the
-  // reasoning that Escape, the backdrop and the button would then converge on
-  // one path. Testing showed `close` never arriving — not for this dialog, and
-  // not for a bare <dialog> created and closed in the same console. Whether
-  // that is this Chromium build or the automation around it was never settled,
-  // and it does not matter: a dismissal that silently fails to clear the
-  // parent's state leaves a stale screening behind and an invisible dialog in
-  // the DOM, and that is too quiet a failure to hang the feature on. So every
-  // route out calls onDismiss directly, and this effect only mirrors state
-  // onto the element.
   useEffect(() => {
     const dialog = ref.current;
-    // Null whenever `event` is null, since the component renders nothing then.
     if (!dialog) return;
 
-    // Where the reader was. Restored on close — see below for why.
+    if (!event) {
+      // Closed rather than unmounted. See the note at the top.
+      if (dialog.open) dialog.close();
+      return;
+    }
+
     const scrollTop = window.scrollY;
 
     if (!dialog.open) {
       try {
         dialog.showModal();
       } catch {
-        // showModal throws if the dialog is already open, and on anything
-        // that does not support the top layer. Falling back to a non-modal
-        // open at least shows the panel instead of silently swallowing the
-        // prompt.
+        // Thrown if it is somehow already open, or where the top layer is not
+        // supported. A non-modal open still shows the panel rather than
+        // swallowing the prompt entirely.
         dialog.open = true;
       }
     }
 
     // Focused here rather than with autoFocus, and with preventScroll.
-    // React's autoFocus calls focus() plainly, and a plain focus() scrolls
-    // the focused element into view — which is harmless while the dialog
-    // sits in the top layer, and is a jump to the very end of a seventeen
-    // thousand pixel page the moment it does not, since this element is the
-    // last child of the screen. preventScroll removes that failure mode
-    // rather than relying on the top layer always working.
-    primaryRef.current?.focus({ preventScroll: true });
+    // React's autoFocus calls focus() plainly, and a plain focus() scrolls the
+    // element into view — harmless while the dialog is in the top layer, and a
+    // jump to the end of a twenty-five thousand pixel page the moment it is
+    // not, since this is the last element on the screen.
+    saveRef.current?.focus({ preventScroll: true });
 
     return () => {
-      if (dialog.open) dialog.close();
       // Closing a modal returns focus to whatever opened it — the showtime
       // link, far up the page — and the browser scrolls that back into view.
-      // Combined with a list that may have re-sorted while the booking tab
-      // was in front, that is how dismissing the prompt could leave someone
-      // reading a different cinema than the one they tapped. Putting the
-      // scroll position back makes the prompt a no-op for the page behind it.
-      window.scrollTo({ top: scrollTop, behavior: 'instant' });
+      // Putting the position back makes the prompt a no-op for the page behind
+      // it. Smooth scrolling is suppressed for the restore: the page sets
+      // scroll-behavior: smooth globally, and animating twenty thousand pixels
+      // is both slow and interruptible halfway.
+      const root = document.documentElement;
+      const previous = root.style.scrollBehavior;
+      root.style.scrollBehavior = 'auto';
+      window.scrollTo(0, scrollTop);
+      root.style.scrollBehavior = previous;
     };
   }, [event]);
-
-  if (!event) return null;
-
-  const minutes = durationMinutes(event.runtimeMinutes);
-  const icsUrl = screeningIcsUrl(event);
-  // Which app the first button reaches, which is the only thing that varies.
-  // Both buttons exist everywhere: an earlier version hid the first one off
-  // Android, which left Firefox users with a file download as their only
-  // option -- the exact thing this is meant to avoid.
-  const opensOwnCalendar = supportsIntentUrls(navigator.userAgent);
 
   return (
     <dialog
@@ -120,95 +114,70 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
       ref={ref}
       aria-labelledby="calprompt-title"
       // A click landing on the dialog element itself is a click on the
-      // backdrop: the content sits in the inner div, which stops propagation
-      // by simply being the target instead.
+      // backdrop: the content sits in the inner div, which is the target
+      // instead for anything inside it.
       onClick={(e) => {
         if (e.target === ref.current) onDismiss();
       }}
-      // Escape closes a modal dialog natively whatever we do, so this does not
+      // Escape closes a modal natively whatever we do, so this does not
       // preventDefault — it just makes sure the parent hears about it. keydown
-      // fires before the default action, and unlike `close` it is ordinary and
-      // reliable.
+      // is ordinary and reliable, unlike `close`.
       onKeyDown={(e) => {
         if (e.key === 'Escape') onDismiss();
       }}
     >
-      <div className="calprompt__panel">
-        <h2 className="calprompt__title" id="calprompt-title">
-          להוסיף ליומן?
-        </h2>
+      {event && (
+        <div className="calprompt__panel">
+          <h2 className="calprompt__title" id="calprompt-title">
+            להוסיף ליומן?
+          </h2>
 
-        <dl className="calprompt__facts">
-          <div className="calprompt__row">
-            <dt>סרט</dt>
-            <dd>{event.filmTitle}</dd>
-          </div>
-          <div className="calprompt__row">
-            <dt>קולנוע</dt>
-            <dd>
-              {event.cinema}
-              <span className="calprompt__chain"> · {event.chain}</span>
-            </dd>
-          </div>
-          <div className="calprompt__row">
-            <dt>מתי</dt>
-            <dd>{whenLabel(event.date, event.time)}</dd>
-          </div>
-        </dl>
+          <dl className="calprompt__facts">
+            <div className="calprompt__row">
+              <dt>סרט</dt>
+              <dd>{event.filmTitle}</dd>
+            </div>
+            <div className="calprompt__row">
+              <dt>קולנוע</dt>
+              <dd>
+                {event.cinema}
+                <span className="calprompt__chain"> · {event.chain}</span>
+              </dd>
+            </div>
+            <div className="calprompt__row">
+              <dt>מתי</dt>
+              <dd>{whenLabel(event.date, event.time)}</dd>
+            </div>
+          </dl>
 
-        {/* An assumption the event encodes that is invisible once it is in
-            the calendar, so it is stated before you commit to it. */}
-        <p className="calprompt__note">
-          משך האירוע {minutes} דק׳ כולל פרסומות
-        </p>
+          {/* Both are assumptions the event encodes and neither is visible
+              once it is in the calendar, so they are stated beforehand. */}
+          <p className="calprompt__note">
+            תזכורת {REMINDER_HOURS} שעות לפני · משך האירוע{' '}
+            {durationMinutes(event.runtimeMinutes)} דק׳ כולל פרסומות
+          </p>
 
-        <div className="calprompt__actions">
-          {/* Never a download, on any platform. Chromium on Android gets an
-              intent and opens whichever calendar the person actually uses;
-              everywhere else it is a plain Google link, which at worst opens
-              the wrong calendar and at best opens the right one — but cannot
-              take the tab to about:blank, which is what an unsupported
-              scheme did to Firefox. */}
-          <a
-            className="calprompt__open pressable"
-            href={openCalendarUrl(
-              event,
-              navigator.userAgent,
-              new URL(icsUrl, window.location.origin).toString(),
-            )}
-            target={opensOwnCalendar ? undefined : '_blank'}
-            rel={opensOwnCalendar ? undefined : 'noopener noreferrer'}
-            onClick={onSave}
-            ref={primaryRef}
-          >
-            {opensOwnCalendar ? 'פתיחת היומן' : 'Google Calendar'}
-          </a>
-
-          {/* The file. Slower, and on a phone it lands in Downloads — the
-              cost of being the only route that can carry an alarm. */}
+          {/* One button. Every route ends at the same file — the only
+              difference is whether Android is asked to open it or the browser
+              is left to save it, and that is not a choice worth presenting. */}
           <a
             className="calprompt__save pressable"
-            href={icsUrl}
+            href={addToCalendarUrl(event, navigator.userAgent, window.location.origin)}
             onClick={onSave}
+            ref={saveRef}
           >
-            קובץ · תזכורת {REMINDER_HOURS} שעות
+            הוספה ליומן
           </a>
+
+          <button
+            type="button"
+            className="calprompt__skip pressable"
+            onClick={onDismiss}
+          >
+            לא עכשיו
+          </button>
         </div>
-
-        <p className="calprompt__hint">
-          {opensOwnCalendar
-            ? `פתיחת היומן מהירה יותר · הקובץ הוא היחיד שמביא תזכורת ${REMINDER_HOURS} שעות`
-            : `ב-Google התזכורת היא ברירת המחדל שלך · בקובץ היא ${REMINDER_HOURS} שעות`}
-        </p>
-
-        <button
-          type="button"
-          className="calprompt__skip pressable"
-          onClick={onDismiss}
-        >
-          לא עכשיו
-        </button>
-      </div>
+      )}
     </dialog>
   );
 }

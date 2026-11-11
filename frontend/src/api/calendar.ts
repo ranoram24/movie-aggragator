@@ -105,87 +105,13 @@ export function screeningIcsUrl(event: ScreeningEvent): string {
 }
 
 /**
- * An Android intent that opens the device's own calendar on a new event,
- * already filled in.
- *
- * ## Why this exists, after two attempts that did not work
- *
- * The goal is the phone's calendar opening on a composer, not a file arriving
- * somewhere. Two routes were tried and both fail on Android:
- *
- *   1. A Blob with a download attribute. A blob + download is BY DEFINITION a
- *      file save; the browser is never given the option to hand it anywhere.
- *   2. The same bytes served over HTTP as text/calendar with
- *      Content-Disposition: inline. This is the documented way to say "display
- *      this, do not save it" — and Chrome on Android downloads it anyway,
- *      because it cannot render the type. Observed on a real device: a
- *      "one file downloaded" bar with an Open button, which is precisely the
- *      step this was meant to remove.
- *
- * An intent URI is not a document at all. It is a request to Android to start
- * an activity, so there is nothing for the browser to download: ACTION_INSERT
- * against the events MIME type is the standard "create an event" intent, and
- * whatever the user has set as their calendar handles it.
- *
- * ## What it cannot carry
- *
- * The reminder. ACTION_INSERT takes a title, a location, a description and a
- * time range, and there is no extra for an alarm — the event gets whatever
- * default the calendar applies. That is the same limit the Google prefill
- * screen has, and it is why the .ics route stays: it is the only one of the
- * three that can express TRIGGER:-PT2H, at the cost of being a file.
- *
- * ## Times
- *
- * Real epoch milliseconds, unlike the floating times in the .ics, because an
- * intent extra is an instant rather than a wall clock. Built with the local
- * Date constructor, so it resolves against the device's timezone — correct for
- * a cinema ticket in Israel held by a phone set to Israeli time, and the same
- * assumption the floating .ics makes.
- */
-export function calendarIntentUrl(event: ScreeningEvent, fallbackUrl: string): string {
-  const [year, month, day] = event.date.split('-').map(Number);
-  const [hour, minute] = event.time.split(':').map(Number);
-  const begin = new Date(year, month - 1, day, hour, minute).getTime();
-  const end = begin + durationMinutes(event.runtimeMinutes) * 60_000;
-
-  const description = [
-    event.chain,
-    event.venueType !== 'regular' ? event.venueType : null,
-    event.ticketUrl,
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  // Every value is percent-encoded: ';' and '=' are the intent URI's own
-  // separators, so an unencoded one in a film title would end the extras list
-  // early and silently drop the rest of the event.
-  const extras = [
-    `S.title=${encodeURIComponent(`${event.filmTitle} — ${event.cinema}`)}`,
-    `S.eventLocation=${encodeURIComponent(
-      event.address ? `${event.cinema}, ${event.address}` : event.cinema,
-    )}`,
-    `S.description=${encodeURIComponent(description)}`,
-    `l.beginTime=${begin}`,
-    `l.endTime=${end}`,
-    // If nothing on the device handles the intent, Chrome goes here instead of
-    // failing silently — so the worst case is the file route, not nothing.
-    `S.browser_fallback_url=${encodeURIComponent(fallbackUrl)}`,
-  ].join(';');
-
-  return `intent://#Intent;action=android.intent.action.INSERT;type=vnd.android.cursor.dir/event;${extras};end`;
-}
-
-/**
  * Whether `intent://` will work: Android AND a Chromium-based browser.
  *
- * Both halves are load-bearing, and the second was missing. intent:// is a
- * CHROMIUM feature, not an Android one — Gecko never implemented it. Offering
- * the link to Firefox for Android did not quietly do nothing, which is what I
- * assumed a dead scheme would do; following it took the tab to about:blank and
- * left the app showing a stale document with no script running. Reported from
- * a real phone, and every other thing on the page looked broken afterwards
- * because nothing was alive to handle it.
+ * Both halves are load-bearing, and the second was missing once. intent:// is
+ * a CHROMIUM feature, not an Android one — Gecko never implemented it.
+ * Offering the link to Firefox for Android did not quietly do nothing, which
+ * is what a dead scheme ought to do; following it took the tab to about:blank
+ * and left the app as a stale document with no script running.
  *
  * Chrome, Samsung Internet and Edge on Android are all Chromium and all
  * support it. Firefox is excluded explicitly as well as by the Chrome test,
@@ -199,76 +125,56 @@ export function supportsIntentUrls(userAgent: string): boolean {
 }
 
 /**
- * A Google Calendar "new event" page, prefilled.
+ * The same .ics URL, wrapped as an Android VIEW intent.
  *
- * Re-added after being removed, which was premature: it was dropped on the
- * reasoning that the intent route covers "open a calendar" better, and that is
- * only true where intent:// exists. On Firefox for Android it does not, and
- * without this the only remaining route there is a file download — the exact
- * thing the whole exercise is trying to avoid. An ordinary https link works in
- * every browser there is.
+ * This is the one route that gets both halves at once, and it took three
+ * attempts to find. The problem is that the two things wanted — the calendar
+ * app opening, and the two-hour reminder — kept living in different places:
  *
- * It shares the intent route's limitation: the prefill interface accepts a
- * title, a time range, a location, a description and a timezone, and has no
- * parameter for an alarm, so the event arrives with the account's default
- * notification. The file remains the only route that can carry TRIGGER:-PT2H.
+ *   * A download carries the alarm and opens nothing. Chrome saves the file
+ *     whatever Content-Disposition says, because it cannot render the type.
+ *   * ACTION_INSERT opens the calendar composer and cannot carry an alarm;
+ *     there is no reminder extra on that intent.
+ *   * A Google Calendar prefill link has the same gap, and reaches one
+ *     particular calendar rather than the device's.
  *
- * /r/eventedit rather than /render. Both are prefill entry points and /render
- * is the one usually quoted, but the Google Calendar Android app registers for
- * calendar.google.com links and handles /render by jumping the grid to the
- * date and discarding every other parameter — observed on a real device as an
- * empty day with no composer. /r/eventedit is the editor's own route.
+ * ACTION_VIEW on the URL, typed as text/calendar, asks Android to open the
+ * file with whatever handles calendars — so the handler fetches the .ics
+ * itself, VALARM and all. The alarm survives because the app is reading the
+ * real file rather than being handed a list of fields.
  *
- * The timezone is handled better here than in the file: naive times plus
- * ctz=Asia/Jerusalem let Google resolve the offset for the screening's own
- * date, DST included, which the .ics has to leave floating.
+ * browser_fallback_url is the same URL unwrapped, so a device with nothing
+ * registered for text/calendar gets today's behaviour — a download — instead
+ * of a dead link. This is strictly an improvement or a no-op, never worse.
  */
-export function googleCalendarUrl(event: ScreeningEvent): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const stamp = (date: string, time: string, addMinutes = 0) => {
-    const [year, month, day] = date.split('-').map(Number);
-    const [hour, minute] = time.split(':').map(Number);
-    // Through Date.UTC on purpose: these are naive times Google resolves with
-    // ctz, and summing them in the running device's timezone would let ITS dst
-    // transition shift a result that has nothing to do with it.
-    const m = new Date(Date.UTC(year, month - 1, day, hour, minute) + addMinutes * 60_000);
-    return (
-      `${m.getUTCFullYear()}${pad(m.getUTCMonth() + 1)}${pad(m.getUTCDate())}` +
-      `T${pad(m.getUTCHours())}${pad(m.getUTCMinutes())}00`
-    );
-  };
-
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: `${event.filmTitle} — ${event.cinema}`,
-    dates: `${stamp(event.date, event.time)}/${stamp(event.date, event.time, durationMinutes(event.runtimeMinutes))}`,
-    location: event.address ? `${event.cinema}, ${event.address}` : event.cinema,
-    details: [
-      event.chain,
-      event.venueType !== 'regular' ? event.venueType : null,
-      event.ticketUrl,
-    ]
-      .filter(Boolean)
-      .join('\n'),
-    ctz: 'Asia/Jerusalem',
-  });
-
-  return `https://calendar.google.com/calendar/u/0/r/eventedit?${params.toString()}`;
+export function icsIntentUrl(absoluteIcsUrl: string): string {
+  const url = new URL(absoluteIcsUrl);
+  // intent:// replaces the scheme in the URI, so it is restored as a field.
+  // Everything after it up to the '#' is the data URI the intent carries.
+  const withoutScheme = `${url.host}${url.pathname}${url.search}`;
+  return (
+    `intent://${withoutScheme}` +
+    `#Intent;scheme=${url.protocol.replace(':', '')}` +
+    ';action=android.intent.action.VIEW' +
+    ';type=text/calendar' +
+    `;S.browser_fallback_url=${encodeURIComponent(absoluteIcsUrl)}` +
+    ';end'
+  );
 }
 
 /**
- * The best "open a calendar on a new event" link this browser can follow.
+ * Where the single "add to calendar" button points.
  *
- * Never a download, on any platform. Chromium on Android gets the intent,
- * which reaches whichever calendar the person actually uses; everything else
- * gets Google, which is a plain link and therefore cannot break anything.
+ * One button, because every route ends at the same .ics — the only difference
+ * is whether Android is asked to open it or the browser is left to save it,
+ * and that is not a choice worth putting in front of someone.
  */
-export function openCalendarUrl(
+export function addToCalendarUrl(
   event: ScreeningEvent,
   userAgent: string,
-  fallbackUrl: string,
+  origin: string,
 ): string {
-  return supportsIntentUrls(userAgent)
-    ? calendarIntentUrl(event, fallbackUrl)
-    : googleCalendarUrl(event);
+  const relative = screeningIcsUrl(event);
+  if (!supportsIntentUrls(userAgent)) return relative;
+  return icsIntentUrl(new URL(relative, origin).toString());
 }

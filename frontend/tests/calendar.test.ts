@@ -13,18 +13,17 @@
  *   land inside a calendar entry. If someone later "simplifies" this by
  *   passing the event's text in the query string, these assertions fail.
  *
- * The intent route is the opposite case and keeps its own tests: there the
- * text IS the interface, carried as extras in a URI whose own separators are
- * ';' and '=' — characters that appear in real film titles. The one thing it
- * cannot express is the alarm, which is why the file route survives alongside
- * it rather than being replaced by it.
+ * There is one route now, not two. Everything ends at the same .ics; the only
+ * difference is whether Android is asked to open it (a VIEW intent) or the
+ * browser is left to save it. That is what keeps the two-hour reminder on
+ * every platform — the previous design's fast route could not carry an alarm
+ * at all, so choosing it meant giving one up.
  */
 
 import {
-  calendarIntentUrl,
+  addToCalendarUrl,
   durationMinutes,
-  googleCalendarUrl,
-  openCalendarUrl,
+  icsIntentUrl,
   screeningIcsUrl,
   supportsIntentUrls,
   type ScreeningEvent,
@@ -88,55 +87,34 @@ for (const word of ['האודיסאה', 'סינמה סיטי נתניה', 'Cinem
 }
 check('no title parameter at all', !icsParams.has('text') && !icsParams.has('title'));
 
-// ---- the Android intent route --------------------------------------------
+// ---- the VIEW intent, which is how one route gets both halves ------------
 
-const FALLBACK = 'https://on-cinema-now.fly.dev/api/screening.ics?film=m1368337';
-const intent = calendarIntentUrl(BASE, FALLBACK);
+const ORIGIN = 'https://on-cinema-now.fly.dev';
+const ABSOLUTE = `${ORIGIN}${screeningIcsUrl(BASE)}`;
+const intent = icsIntentUrl(ABSOLUTE);
 
 check('is an intent url', intent.startsWith('intent://'));
-check('asks Android to create an event',
-  intent.includes('action=android.intent.action.INSERT'));
-check('targets the calendar events type',
-  intent.includes('type=vnd.android.cursor.dir/event'));
+check('asks Android to VIEW the file',
+  intent.includes('action=android.intent.action.VIEW'));
+check('typed as a calendar, so a calendar handles it',
+  intent.includes('type=text/calendar'));
+check('restores the scheme it replaced', intent.includes(';scheme=https'));
 check('is terminated', intent.endsWith(';end'));
 
-/** An extra's value, decoded. */
-function extra(key: string): string | null {
-  const m = intent.match(new RegExp(`(?:^|;)(?:S|l)\.${key}=([^;]*)`));
-  return m ? decodeURIComponent(m[1]) : null;
-}
+// The point of VIEW over INSERT: the handler fetches the real file, so the
+// alarm comes with it. INSERT hands over a list of fields and has no extra
+// for a reminder at all.
+check('carries the host and path of the file',
+  intent.includes('on-cinema-now.fly.dev/api/screening.ics'));
+check('keeps the query that identifies the screening',
+  intent.includes('film=') && intent.includes('theatre=') && intent.includes('at='));
 
-check('titles with the film and the cinema',
-  (extra('title') ?? '').includes('האודיסאה')
-  && (extra('title') ?? '').includes('סינמה סיטי נתניה'));
-check('carries the address', (extra('eventLocation') ?? '').includes('המחקר 3'));
-check('links back to the booking',
-  (extra('description') ?? '').includes('tickets.cinema-city.co.il'));
-eq('falls back to the file if nothing handles it',
-  extra('browser_fallback_url'), FALLBACK);
+const fb = intent.match(/S\.browser_fallback_url=([^;]*)/);
+eq('falls back to the plain file', decodeURIComponent(fb?.[1] ?? ''), ABSOLUTE);
 
-// Real epoch millis, not a wall clock — an intent extra is an instant. The
-// window must still be the same length as the file's.
-const begin = Number(extra('beginTime'));
-const end = Number(extra('endTime'));
-check('beginTime is epoch millis', Number.isFinite(begin) && begin > 1e12);
-eq('the window matches the duration shown',
-  (end - begin) / 60_000, durationMinutes(BASE.runtimeMinutes));
-eq('and begins at the advertised local time',
-  new Date(begin).getHours() * 60 + new Date(begin).getMinutes(), 20 * 60 + 20);
-
-// ';' and '=' end an extra in this syntax, so an unencoded one in a title
-// would truncate the event and silently drop everything after it.
-const awkward = calendarIntentUrl(
-  { ...BASE, filmTitle: 'מואנה; הסרט=המלא', cinema: 'קולנוע; תל אביב' },
-  FALLBACK,
-);
-check('separators inside values are encoded',
-  !awkward.split('S.title=')[1].split(';')[0].includes('='));
-check('every extra still present after an awkward title',
-  ['S.title=', 'S.eventLocation=', 'S.description=', 'l.beginTime=', 'l.endTime=']
-    .every((k) => awkward.includes(k)));
-check('and it is still terminated', awkward.endsWith(';end'));
+// A '#' would end the intent URI early and swallow the rest of it; the .ics
+// URL must never carry a fragment.
+check('the ics url has no fragment to break the intent', !ABSOLUTE.includes('#'));
 
 // ---- who may be given an intent url --------------------------------------
 
@@ -158,45 +136,29 @@ check('FIREFOX ON ANDROID DOES NOT', !supportsIntentUrls(FIREFOX_ANDROID));
 check('desktop does not', !supportsIntentUrls(DESKTOP));
 check('iphone does not', !supportsIntentUrls(IPHONE));
 
-// ---- the route each browser is actually handed ---------------------------
+// ---- what each browser is actually handed --------------------------------
 
-const ICS_FALLBACK = 'https://on-cinema-now.fly.dev/api/screening.ics?film=m1';
+check('chrome android is asked to open the file',
+  addToCalendarUrl(BASE, CHROME_ANDROID, ORIGIN).startsWith('intent://'));
 
-check('chrome android is handed an intent',
-  openCalendarUrl(BASE, CHROME_ANDROID, ICS_FALLBACK).startsWith('intent://'));
-check('firefox android is handed a plain https link',
-  openCalendarUrl(BASE, FIREFOX_ANDROID, ICS_FALLBACK).startsWith('https://'));
-check('and never an intent it cannot follow',
-  !openCalendarUrl(BASE, FIREFOX_ANDROID, ICS_FALLBACK).includes('intent://'));
-check('desktop is handed a plain https link',
-  openCalendarUrl(BASE, DESKTOP, ICS_FALLBACK).startsWith('https://'));
-
-// Whatever the browser, the first button must never be a file.
-for (const [name, ua] of [['chrome', CHROME_ANDROID], ['firefox', FIREFOX_ANDROID],
-                          ['samsung', SAMSUNG_ANDROID], ['desktop', DESKTOP],
+// Everything else gets the plain relative URL — which downloads, and is the
+// honest answer: no web API can open a file in another app without the
+// browser's cooperation, and only Chromium offers any.
+for (const [name, ua] of [['firefox', FIREFOX_ANDROID], ['desktop', DESKTOP],
                           ['iphone', IPHONE]] as const) {
-  const url = openCalendarUrl(BASE, ua, ICS_FALLBACK);
-  check(`${name}: the open route is not the .ics`, !url.includes('/api/screening.ics?film=m1368337'));
-  check(`${name}: the open route is followable`,
-    url.startsWith('https://') || url.startsWith('intent://'));
+  const url = addToCalendarUrl(BASE, ua, ORIGIN);
+  check(`${name} is never handed an intent it cannot follow`,
+    !url.includes('intent://'));
+  check(`${name} still gets the file`, url.startsWith('/api/screening.ics?'));
 }
 
-// ---- the google route ----------------------------------------------------
-
-const gcal = new URL(googleCalendarUrl(BASE));
-eq('points at Google Calendar', gcal.host, 'calendar.google.com');
-// The app intercepts /render and answers it by jumping to the date and
-// dropping every other parameter — an empty day, observed on a real phone.
-eq('uses the event editor route', gcal.pathname, '/calendar/u/0/r/eventedit');
-check('is not /render', !gcal.pathname.includes('/render'));
-eq('carries the same window as the file',
-  gcal.searchParams.get('dates'), '20261112T202000/20261112T231000');
-eq('names the timezone rather than guessing an offset',
-  gcal.searchParams.get('ctz'), 'Asia/Jerusalem');
-check('titles with the film and the cinema',
-  (gcal.searchParams.get('text') ?? '').includes('האודיסאה'));
-check('no reminder parameter exists to set',
-  !['reminder', 'reminders', 'alarm'].some((k) => gcal.searchParams.has(k)));
+// Whatever the browser, the destination is the same file — so the two-hour
+// reminder survives on every platform. That is the property the previous
+// design lost: its fast route could not carry an alarm at all.
+for (const ua of [CHROME_ANDROID, FIREFOX_ANDROID, DESKTOP, IPHONE]) {
+  check('every route ends at the .ics',
+    addToCalendarUrl(BASE, ua, ORIGIN).includes('/api/screening.ics?'));
+}
 
 // ---- report --------------------------------------------------------------
 

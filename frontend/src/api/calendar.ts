@@ -177,11 +177,98 @@ export function calendarIntentUrl(event: ScreeningEvent, fallbackUrl: string): s
 }
 
 /**
- * Whether to use the intent route. Android only — `intent://` is a Chrome on
- * Android scheme and does nothing anywhere else, so this is one of the few
- * places where sniffing the agent is the correct test rather than a shortcut.
- * Takes the string explicitly so it can be tested without a browser.
+ * Whether `intent://` will work: Android AND a Chromium-based browser.
+ *
+ * Both halves are load-bearing, and the second was missing. intent:// is a
+ * CHROMIUM feature, not an Android one — Gecko never implemented it. Offering
+ * the link to Firefox for Android did not quietly do nothing, which is what I
+ * assumed a dead scheme would do; following it took the tab to about:blank and
+ * left the app showing a stale document with no script running. Reported from
+ * a real phone, and every other thing on the page looked broken afterwards
+ * because nothing was alive to handle it.
+ *
+ * Chrome, Samsung Internet and Edge on Android are all Chromium and all
+ * support it. Firefox is excluded explicitly as well as by the Chrome test,
+ * because the cost of being wrong here is a destroyed page rather than a
+ * missing button.
  */
-export function isAndroid(userAgent: string): boolean {
-  return /android/i.test(userAgent);
+export function supportsIntentUrls(userAgent: string): boolean {
+  if (!/android/i.test(userAgent)) return false;
+  if (/firefox|fxios/i.test(userAgent)) return false;
+  return /chrome\/|samsungbrowser|edga/i.test(userAgent);
+}
+
+/**
+ * A Google Calendar "new event" page, prefilled.
+ *
+ * Re-added after being removed, which was premature: it was dropped on the
+ * reasoning that the intent route covers "open a calendar" better, and that is
+ * only true where intent:// exists. On Firefox for Android it does not, and
+ * without this the only remaining route there is a file download — the exact
+ * thing the whole exercise is trying to avoid. An ordinary https link works in
+ * every browser there is.
+ *
+ * It shares the intent route's limitation: the prefill interface accepts a
+ * title, a time range, a location, a description and a timezone, and has no
+ * parameter for an alarm, so the event arrives with the account's default
+ * notification. The file remains the only route that can carry TRIGGER:-PT2H.
+ *
+ * /r/eventedit rather than /render. Both are prefill entry points and /render
+ * is the one usually quoted, but the Google Calendar Android app registers for
+ * calendar.google.com links and handles /render by jumping the grid to the
+ * date and discarding every other parameter — observed on a real device as an
+ * empty day with no composer. /r/eventedit is the editor's own route.
+ *
+ * The timezone is handled better here than in the file: naive times plus
+ * ctz=Asia/Jerusalem let Google resolve the offset for the screening's own
+ * date, DST included, which the .ics has to leave floating.
+ */
+export function googleCalendarUrl(event: ScreeningEvent): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = (date: string, time: string, addMinutes = 0) => {
+    const [year, month, day] = date.split('-').map(Number);
+    const [hour, minute] = time.split(':').map(Number);
+    // Through Date.UTC on purpose: these are naive times Google resolves with
+    // ctz, and summing them in the running device's timezone would let ITS dst
+    // transition shift a result that has nothing to do with it.
+    const m = new Date(Date.UTC(year, month - 1, day, hour, minute) + addMinutes * 60_000);
+    return (
+      `${m.getUTCFullYear()}${pad(m.getUTCMonth() + 1)}${pad(m.getUTCDate())}` +
+      `T${pad(m.getUTCHours())}${pad(m.getUTCMinutes())}00`
+    );
+  };
+
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `${event.filmTitle} — ${event.cinema}`,
+    dates: `${stamp(event.date, event.time)}/${stamp(event.date, event.time, durationMinutes(event.runtimeMinutes))}`,
+    location: event.address ? `${event.cinema}, ${event.address}` : event.cinema,
+    details: [
+      event.chain,
+      event.venueType !== 'regular' ? event.venueType : null,
+      event.ticketUrl,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    ctz: 'Asia/Jerusalem',
+  });
+
+  return `https://calendar.google.com/calendar/u/0/r/eventedit?${params.toString()}`;
+}
+
+/**
+ * The best "open a calendar on a new event" link this browser can follow.
+ *
+ * Never a download, on any platform. Chromium on Android gets the intent,
+ * which reaches whichever calendar the person actually uses; everything else
+ * gets Google, which is a plain link and therefore cannot break anything.
+ */
+export function openCalendarUrl(
+  event: ScreeningEvent,
+  userAgent: string,
+  fallbackUrl: string,
+): string {
+  return supportsIntentUrls(userAgent)
+    ? calendarIntentUrl(event, fallbackUrl)
+    : googleCalendarUrl(event);
 }

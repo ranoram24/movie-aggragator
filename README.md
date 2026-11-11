@@ -71,15 +71,18 @@ Tapping a time opens the checkout in a new tab and leaves a question behind in
 this one: **להוסיף ליומן?** — with that exact screening's film, cinema, date and
 time, and two ways to keep it.
 
-On a phone, **פתיחת היומן** opens your own calendar app on a new event, already
-filled in — no file, no download, no "open with". **קובץ** gets you the same
-event as a calendar file instead, which is slower but is the only route that
-carries a **reminder two hours before**, roughly when you need to start
-thinking about leaving. Android's create-event intent has no way to express an
-alarm, so that trade is real; the sheet says so under the buttons.
+The first button opens a calendar on a new event, already filled in, and never
+downloads anything. In Chrome, Samsung Internet or Edge on Android it is
+**פתיחת היומן** and opens whichever calendar app you actually use; everywhere
+else — Firefox, iPhone, a computer — it is **Google Calendar**, because the
+Android intent that reaches your own app is a Chromium feature that other
+browsers cannot follow.
 
-On a computer there is one button, because the file simply opens in whatever
-calendar you already use.
+**קובץ** gets the same event as a calendar file. It is slower, and on a phone
+it lands in Downloads, but it is the only route that carries a **reminder two
+hours before** — roughly when you need to start thinking about leaving. Neither
+the Android intent nor Google's prefill screen can express an alarm, so that
+trade is real, and the sheet says which is which under the buttons.
 
 The event runs for the film's length plus twenty minutes of trailers, so the
 block in your calendar covers the time you are actually in the building rather

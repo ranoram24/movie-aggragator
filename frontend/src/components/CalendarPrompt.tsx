@@ -24,10 +24,10 @@
 import { useEffect, useRef } from 'react';
 import {
   REMINDER_HOURS,
-  calendarIntentUrl,
   durationMinutes,
-  isAndroid,
+  openCalendarUrl,
   screeningIcsUrl,
+  supportsIntentUrls,
   type ScreeningEvent,
 } from '../api/calendar';
 import './CalendarPrompt.css';
@@ -107,8 +107,12 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
   if (!event) return null;
 
   const minutes = durationMinutes(event.runtimeMinutes);
-  const android = isAndroid(navigator.userAgent);
   const icsUrl = screeningIcsUrl(event);
+  // Which app the first button reaches, which is the only thing that varies.
+  // Both buttons exist everywhere: an earlier version hid the first one off
+  // Android, which left Firefox users with a file download as their only
+  // option -- the exact thing this is meant to avoid.
+  const opensOwnCalendar = supportsIntentUrls(navigator.userAgent);
 
   return (
     <dialog
@@ -159,41 +163,43 @@ export function CalendarPrompt({ event, onSave, onDismiss }: Props) {
         </p>
 
         <div className="calprompt__actions">
-          {/* On Android the first button is an intent, which opens whatever
-              calendar the person actually uses on a new event — no file, no
-              download bar, no "open with". Everywhere else that route does not
-              exist, so the file IS the primary action and there is only one
-              button. */}
-          {android && (
-            <a
-              className="calprompt__open pressable"
-              href={calendarIntentUrl(event, new URL(icsUrl, window.location.origin).toString())}
-              onClick={onSave}
-              ref={primaryRef}
-            >
-              פתיחת היומן
-            </a>
-          )}
+          {/* Never a download, on any platform. Chromium on Android gets an
+              intent and opens whichever calendar the person actually uses;
+              everywhere else it is a plain Google link, which at worst opens
+              the wrong calendar and at best opens the right one — but cannot
+              take the tab to about:blank, which is what an unsupported
+              scheme did to Firefox. */}
+          <a
+            className="calprompt__open pressable"
+            href={openCalendarUrl(
+              event,
+              navigator.userAgent,
+              new URL(icsUrl, window.location.origin).toString(),
+            )}
+            target={opensOwnCalendar ? undefined : '_blank'}
+            rel={opensOwnCalendar ? undefined : 'noopener noreferrer'}
+            onClick={onSave}
+            ref={primaryRef}
+          >
+            {opensOwnCalendar ? 'פתיחת היומן' : 'Google Calendar'}
+          </a>
 
-          {/* A plain link to a text/calendar URL. On a desktop it opens in the
-              default calendar app; on Android it lands in Downloads, which is
-              the cost of being the only route that carries the reminder. */}
+          {/* The file. Slower, and on a phone it lands in Downloads — the
+              cost of being the only route that can carry an alarm. */}
           <a
             className="calprompt__save pressable"
             href={icsUrl}
             onClick={onSave}
-            ref={android ? undefined : primaryRef}
           >
-            {android ? `קובץ · תזכורת ${REMINDER_HOURS} שעות` : `הוספה ליומן · תזכורת ${REMINDER_HOURS} שעות`}
+            קובץ · תזכורת {REMINDER_HOURS} שעות
           </a>
         </div>
 
-        {/* Only worth saying where there is a choice to make. */}
-        {android && (
-          <p className="calprompt__hint">
-            פתיחת היומן מהירה יותר · הקובץ הוא היחיד שמביא תזכורת {REMINDER_HOURS} שעות
-          </p>
-        )}
+        <p className="calprompt__hint">
+          {opensOwnCalendar
+            ? `פתיחת היומן מהירה יותר · הקובץ הוא היחיד שמביא תזכורת ${REMINDER_HOURS} שעות`
+            : `ב-Google התזכורת היא ברירת המחדל שלך · בקובץ היא ${REMINDER_HOURS} שעות`}
+        </p>
 
         <button
           type="button"

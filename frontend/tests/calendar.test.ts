@@ -23,8 +23,10 @@
 import {
   calendarIntentUrl,
   durationMinutes,
-  isAndroid,
+  googleCalendarUrl,
+  openCalendarUrl,
   screeningIcsUrl,
+  supportsIntentUrls,
   type ScreeningEvent,
 } from '../src/api/calendar.ts';
 
@@ -136,14 +138,65 @@ check('every extra still present after an awkward title',
     .every((k) => awkward.includes(k)));
 check('and it is still terminated', awkward.endsWith(';end'));
 
-// ---- platform ------------------------------------------------------------
+// ---- who may be given an intent url --------------------------------------
 
-check('android phone is detected',
-  isAndroid('Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 Chrome/152'));
-check('desktop is not',
-  !isAndroid('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152'));
-check('iphone is not — intent:// is a Chrome on Android scheme',
-  !isAndroid('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Version/18.0 Mobile Safari'));
+const CHROME_ANDROID = 'Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36';
+const FIREFOX_ANDROID = 'Mozilla/5.0 (Android 14; Mobile; rv:132.0) Gecko/132.0 Firefox/132.0';
+const SAMSUNG_ANDROID = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36';
+const EDGE_ANDROID = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36 EdgA/152.0.0.0';
+const DESKTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36';
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1';
+
+check('chrome on android gets the intent', supportsIntentUrls(CHROME_ANDROID));
+check('samsung internet is chromium, so it does too', supportsIntentUrls(SAMSUNG_ANDROID));
+check('edge on android too', supportsIntentUrls(EDGE_ANDROID));
+
+// The one that matters. intent:// is a Chromium feature, not an Android one.
+// Handing it to Gecko did not harmlessly do nothing — it took the tab to
+// about:blank and left the app as a dead document.
+check('FIREFOX ON ANDROID DOES NOT', !supportsIntentUrls(FIREFOX_ANDROID));
+check('desktop does not', !supportsIntentUrls(DESKTOP));
+check('iphone does not', !supportsIntentUrls(IPHONE));
+
+// ---- the route each browser is actually handed ---------------------------
+
+const ICS_FALLBACK = 'https://on-cinema-now.fly.dev/api/screening.ics?film=m1';
+
+check('chrome android is handed an intent',
+  openCalendarUrl(BASE, CHROME_ANDROID, ICS_FALLBACK).startsWith('intent://'));
+check('firefox android is handed a plain https link',
+  openCalendarUrl(BASE, FIREFOX_ANDROID, ICS_FALLBACK).startsWith('https://'));
+check('and never an intent it cannot follow',
+  !openCalendarUrl(BASE, FIREFOX_ANDROID, ICS_FALLBACK).includes('intent://'));
+check('desktop is handed a plain https link',
+  openCalendarUrl(BASE, DESKTOP, ICS_FALLBACK).startsWith('https://'));
+
+// Whatever the browser, the first button must never be a file.
+for (const [name, ua] of [['chrome', CHROME_ANDROID], ['firefox', FIREFOX_ANDROID],
+                          ['samsung', SAMSUNG_ANDROID], ['desktop', DESKTOP],
+                          ['iphone', IPHONE]] as const) {
+  const url = openCalendarUrl(BASE, ua, ICS_FALLBACK);
+  check(`${name}: the open route is not the .ics`, !url.includes('/api/screening.ics?film=m1368337'));
+  check(`${name}: the open route is followable`,
+    url.startsWith('https://') || url.startsWith('intent://'));
+}
+
+// ---- the google route ----------------------------------------------------
+
+const gcal = new URL(googleCalendarUrl(BASE));
+eq('points at Google Calendar', gcal.host, 'calendar.google.com');
+// The app intercepts /render and answers it by jumping to the date and
+// dropping every other parameter — an empty day, observed on a real phone.
+eq('uses the event editor route', gcal.pathname, '/calendar/u/0/r/eventedit');
+check('is not /render', !gcal.pathname.includes('/render'));
+eq('carries the same window as the file',
+  gcal.searchParams.get('dates'), '20261112T202000/20261112T231000');
+eq('names the timezone rather than guessing an offset',
+  gcal.searchParams.get('ctz'), 'Asia/Jerusalem');
+check('titles with the film and the cinema',
+  (gcal.searchParams.get('text') ?? '').includes('האודיסאה'));
+check('no reminder parameter exists to set',
+  !['reminder', 'reminders', 'alarm'].some((k) => gcal.searchParams.has(k)));
 
 // ---- report --------------------------------------------------------------
 

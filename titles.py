@@ -20,16 +20,51 @@ from difflib import SequenceMatcher
 DUB_WORDS = r"(?:מדובב(?:ת)?|אנגלית|דובר(?:ת)?\s+עברית|مدبلج[^\s]*)"
 DUB_SUFFIX_RE = re.compile(rf"[\s\-–—]*\(?\s*{DUB_WORDS}(?:\s+ל?\S+)?\s*\)?\s*$")
 
-# Programming strands the cinemas prepend to an ordinary film, e.g.
-# "סינמה נוסטלגיה - פלונטר" is just פלונטר shown in a retro season.
-STRAND_PREFIX_RE = re.compile(r"^\s*(?:סינמה נוסטלגיה|קלאסיקה|מועדון[^-–]{0,20})\s*[-–]\s*")
+# Programming strands and screening types the cinemas prepend to an ordinary
+# film. "סינמה נוסטלגיה - פלונטר" is just פלונטר shown in a retro season, and
+# "טרום בכורה - כבשה בקופסה" is just כבשה בקופסה shown before release.
+#
+# The preview-screening prefixes were added after they produced a card titled
+# "טרום בכורה" -- the words for "preview screening" -- carrying three unrelated
+# Lev films and somebody else's poster. The mechanism is worth stating because
+# it is not obvious: title_segments splits a title on " - " so that a
+# bilingual listing can be searched in each language, and find_best_match
+# queries those segments IN ORDER and stops at the first confident hit. A
+# leading "טרום בכורה" is therefore searched on its own, before the film's
+# actual name -- and TMDb contains an entry titled exactly that, so it matched
+# at 100 and the real title was never queried. Every preview screening in the
+# catalogue collapsed onto one junk film.
+#
+# Stripping the prefix here fixes it at the source: the phrase never becomes a
+# segment, so it can never be searched for.
+SCREENING_TYPE = (
+    r"טרום[\s-]?בכורה|הקרנה\s+מוקדמת|הצגה\s+מוקדמת|הקרנת\s+בכורה|"
+    r"פרימיירה|הקרנה\s+מיוחדת|הקרנה\s+חגיגית"
+)
+STRAND_PREFIX_RE = re.compile(
+    rf"^\s*(?:סינמה נוסטלגיה|קלאסיקה|מועדון[^-–]{{0,20}}|{SCREENING_TYPE})\s*[-–:]\s*"
+)
 
 # Trailing event blurbs, e.g. "לה לה לנד-חגיגות העשור".
 EVENT_SUFFIX_RE = re.compile(r"\s*[-–]\s*(?:חגיגות[^-–]*|הקרנה מיוחדת|שיח יוצרים.*)\s*$")
 
+# A trailing note about the KIND of screening rather than the film: a
+# sensory-friendly showing, a gala. Separate from EVENT_SUFFIX_RE because the
+# chains do not reliably put a dash in front of it -- Lev writes
+# "פיניק 2 - להציל את המפלצות עברית הקרנה רגישה", where the note simply runs
+# on after the language. Left in, it both defeats the TMDb search and splits
+# the film onto its own card.
+SCREENING_NOTE_SUFFIX_RE = re.compile(
+    r"\s*[-–]?\s*(?:הקרנה\s+רגישה|הקרנה\s+מיוחדת|הקרנה\s+חגיגית|"
+    r"הקרנה\s+מונגשת|מופע\s+מיוחד)\s*$"
+)
+
 # A bare language word with no "מדובב" in front, as Hot Cinema sometimes writes
 # it: "מפרץ ההרפתקאות: אי הדינוזאורים רוסית".
-BARE_LANGUAGE_RE = re.compile(r"\s+(?:רוסית|צרפתית|ספרדית|ערבית)\s*$")
+# עברית included: Lev appends it to mark the Hebrew-language showing, as in
+# "פיניק 2 - להציל את המפלצות עברית", and left on it keeps the title from
+# matching the film.
+BARE_LANGUAGE_RE = re.compile(r"\s+(?:רוסית|צרפתית|ספרדית|ערבית|עברית)\s*$")
 
 # Format descriptors the chains bolt onto a title. "מואנה לייב אקשן" is the
 # same film TMDb simply calls "Moana" -- leaving the words in stops it matching
@@ -59,6 +94,7 @@ def _strip_decoration(title: str) -> str:
         previous = title
         title = DUB_SUFFIX_RE.sub("", title)
         title = EVENT_SUFFIX_RE.sub("", title)
+        title = SCREENING_NOTE_SUFFIX_RE.sub("", title)
         title = BARE_LANGUAGE_RE.sub("", title)
         title = FORMAT_WORDS_RE.sub(" ", title)
         # A trailing full stop is chain punctuation, not part of the name:
@@ -187,3 +223,29 @@ def title_slug(title: str | None) -> str:
     """
     cleaned = normalize_title(title or "").lower()
     return re.sub(r"[^\w֐-׿Ѐ-ӿ؀-ۿ]+", "-", cleaned).strip("-")
+
+
+def scripts_in(text: str | None) -> set[str]:
+    """Which writing systems a string contains, by the SCRIPTS table above."""
+    if not text:
+        return set()
+    return {name for name, pattern, _ in SCRIPTS if pattern.search(text)}
+
+
+def shares_script(a: str | None, b: str | None) -> bool:
+    """Whether two strings have any writing system in common.
+
+    The guard on comparing titles for similarity at all. A Russian-dubbed
+    listing is titled "КЛЭЙФЕЙС" while the film is stored as "קלייפייס", and
+    those are the SAME FILM -- matching them across scripts is a feature this
+    project went to some trouble to build. Scoring them against each other
+    returns nearly zero, which says nothing about whether the match is right;
+    it only says the two strings are written in different alphabets.
+
+    So where there is no shared script there is no evidence either way, and a
+    checker that treats "no evidence" as "wrong" unlinks every correct
+    cross-script match it sees. That happened: a repair pass meant to fix two
+    bad cards also tore apart the Russian and Hebrew halves of several good
+    ones.
+    """
+    return bool(scripts_in(a) & scripts_in(b))

@@ -207,7 +207,7 @@ def group(db) -> dict:
     for index, listing in enumerate(listings):
         clusters.setdefault(find(index), []).append(listing)
 
-    grouped = adopted = 0
+    grouped = adopted = conflicted = 0
     for root, members in clusters.items():
         # Named by the first hash in the cluster, so the key is stable across
         # runs. A cluster where nobody has artwork keeps a NULL group and its
@@ -221,8 +221,42 @@ def group(db) -> dict:
         if len(members) < 2:
             continue
 
+        # A cluster holding two DIFFERENT confidently-matched films is not
+        # evidence that those films are the same. It is evidence that the
+        # clustering is wrong, and propagating either id through it is how one
+        # bad row becomes a whole bad card.
+        #
+        # Seen in production: Cinema City published the wrong artwork on its
+        # Hunger Games listing, so that listing's poster matched a different
+        # film while its title matched the real one. Union-find joined the two
+        # groups through it, and the loop below then stamped Regnmannen's id
+        # onto three chains' Hunger Games listings -- which is why the card
+        # showed the Hunger Games poster under the title "ויהי גשם", and why
+        # the one correctly matched listing was left stranded on a card of its
+        # own.
+        #
+        # match_confidence distinguishes the two kinds of match: a TMDb hit
+        # stores its score, while a listing matched by poster or by spelling
+        # stores 0. Only scored matches count as evidence here, so adopted ids
+        # cannot vote to spread themselves further.
+        confident = {
+            m.movie_id for m in members
+            if m.movie_id and (m.match_confidence or 0) > 0
+        }
+        if len(confident) > 1:
+            conflicted += 1
+            log.warning(
+                "poster cluster spans %s separately matched films (%s) -- "
+                "not propagating: %s",
+                len(confident), sorted(confident),
+                ", ".join(m.raw_title[:28] for m in members[:4]),
+            )
+            continue
+
         # Propagate a known film id across the cluster.
-        known = next((m.movie_id for m in members if m.movie_id), None)
+        known = next(iter(confident), None) or next(
+            (m.movie_id for m in members if m.movie_id), None
+        )
         if not known:
             continue
         for member in members:
@@ -241,6 +275,11 @@ def group(db) -> dict:
         "multi_chain_clusters": multi,
         "grouped": grouped,
         "adopted": adopted,
+        # Clusters refused because they spanned two separately matched films.
+        # Worth surfacing rather than hiding: a non-zero number means some
+        # chain's artwork disagrees with its own title, which is the signal
+        # that produced a wrong card the first time.
+        "conflicted": conflicted,
     }
 
 

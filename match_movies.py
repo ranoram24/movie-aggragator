@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 from rapidfuzz import fuzz
 from database import SessionLocal
 from models import SourceMovieListing, Movie
-from titles import normalize_title, title_segments, fold_for_compare, near_identical
+from titles import (normalize_title, title_segments, fold_for_compare,
+                    near_identical, shares_script)
 
 load_dotenv()
 token = os.getenv("TMDB_TOKEN")
@@ -69,9 +70,28 @@ def find_best_match(raw_title: str, threshold: int = 85):
     cleaned = normalize_title(raw_title)
     queries = title_segments(cleaned) or [(cleaned, "he-IL")]
 
+    # Longest segment first, and no stopping at the first confident hit.
+    #
+    # Both halves of that are a fix for the same failure. Segments used to be
+    # tried in the order they appear and the loop broke as soon as one scored
+    # above the threshold, which means a SHORT LEADING LABEL decided the match
+    # before the film's real name was ever searched. "טרום בכורה - כבשה
+    # בקופסה" was searched as "טרום בכורה" first; TMDb has an entry titled
+    # exactly that, it scored 100, the loop stopped, and three unrelated films
+    # ended up on one card.
+    #
+    # normalize_title now strips that particular prefix, but the ordering was
+    # the deeper problem: any leading fragment that happens to name something
+    # on TMDb could do the same. Searching the most specific segment first and
+    # letting every segment compete makes the winner the best evidence rather
+    # than the earliest. The early exit survives only as "stop once a segment
+    # matched perfectly", where nothing later can beat it.
+    queries = sorted(queries, key=lambda q: len(q[0]), reverse=True)
+
     best_result = None
     best_score = 0.0
     best_rank = None
+    best_length = 0
 
     for query, language in queries:
         for candidate in search_tmdb(query, language=language):
@@ -85,8 +105,17 @@ def find_best_match(raw_title: str, threshold: int = 85):
             rank = _prominence_rank(candidate)
             if score > best_score or best_rank is None or rank > best_rank:
                 best_score, best_rank, best_result = score, rank, candidate
-        if best_score >= threshold:
+                best_length = len(query)
+        # A perfect hit on a segment cannot be improved on, so the remaining
+        # (shorter) segments are not worth a request.
+        if best_score >= 100:
             break
+
+    # A short segment has to clear a higher bar than a long one. Two or three
+    # words match far too many things on TMDb, and when they do it is usually
+    # a label rather than a title -- which is exactly how this went wrong.
+    if best_length < 12 and best_score < 95:
+        return None, best_score
 
     if best_score >= threshold:
         return best_result, best_score
@@ -155,6 +184,97 @@ def find_local_match(db, raw_title: str):
     return None
 
 
+# How far a listing's title may drift from the film it is linked to before
+# the link is treated as wrong. Two bars, because the two kinds of match carry
+# different evidence:
+#
+#   * A TITLE match stored the score that produced it, so the titles resembled
+#     each other at the time. If they no longer do, something changed
+#     underneath -- and TMDb is user-edited, which is exactly what happened:
+#     entry 1324241 was once labelled as the new Hunger Games and was later
+#     corrected to "Regnmannen", silently leaving every listing that matched it
+#     pointing at the wrong film.
+#   * A POSTER or SPELLING match never involved the title, so disagreement is
+#     normal there -- three chains word one opera three ways. Only total
+#     unrelatedness is evidence of a mistake.
+TITLE_MATCH_FLOOR = 70
+ADOPTED_MATCH_FLOOR = 40
+
+
+def _agreement(raw_title: str, movie) -> float | None:
+    """How much a listing's title still looks like the film it is linked to.
+
+    None means "no basis to judge", which is NOT the same as a low score and
+    must not be treated as one. A Russian-dubbed listing is titled "КЛЭЙФЕЙС"
+    while its film is stored as "קלייפייס": the same film, deliberately
+    matched across scripts, and scoring one against the other returns nearly
+    zero purely because the alphabets differ. Only titles sharing a writing
+    system with the listing are compared, and if none do, the link stands.
+
+    Learned the hard way — a repair pass that scored across scripts unlinked
+    every correct Russian-to-Hebrew match it met and split those films onto
+    extra cards.
+    """
+    cleaned = normalize_title(raw_title)
+    comparable = [t for t in (movie.title_he, movie.title_en)
+                  if t and shares_script(cleaned, t)]
+    if not comparable:
+        return None
+    return max(_score(cleaned, {"title": t, "original_title": t})
+               for t in comparable)
+
+
+def unlink_stale_matches(db, verbose: bool = False) -> dict:
+    """Break links between a listing and a film that no longer resemble each other.
+
+    Runs before every matching pass, because matching only ever considers
+    listings with no film at all -- so without this, one wrong link is
+    permanent. Everything it unlinks is re-matched moments later by the pass it
+    precedes, so the cost of being slightly too eager is a re-match, while the
+    cost of being too timid is a wrong card that never heals.
+
+    Both cards this was written for were of that permanent kind: four chains'
+    Hunger Games listings pinned to a Norwegian film, and three different Lev
+    films pinned to a TMDb entry titled "preview screening".
+    """
+    from models import Movie
+
+    movies = {m.id: m for m in db.query(Movie)}
+    unlinked = 0
+    for listing in (
+        db.query(SourceMovieListing)
+        .filter(SourceMovieListing.movie_id.isnot(None))
+        .all()
+    ):
+        movie = movies.get(listing.movie_id)
+        if movie is None or not (movie.title_he or movie.title_en):
+            continue
+        if not normalize_title(listing.raw_title or ""):
+            continue    # nothing to judge it on
+
+        confident = (listing.match_confidence or 0) > 0
+        floor = TITLE_MATCH_FLOOR if confident else ADOPTED_MATCH_FLOOR
+        score = _agreement(listing.raw_title, movie)
+        if score is None or score >= floor:
+            continue    # agrees, or there is no shared script to judge it on
+
+        log.info("unlinking stale match: %r was film %s (%r)",
+                 listing.raw_title[:48], movie.id, (movie.title_he or "")[:32])
+        if verbose:
+            print(f"- {listing.raw_title} =/= {movie.title_he}")
+        listing.movie_id = None
+        listing.match_confidence = None
+        # Cleared too: the group was computed while this listing was in the
+        # wrong cluster, and leaving it would keep the card merged even after
+        # the film id is corrected.
+        listing.poster_group = None
+        unlinked += 1
+
+    if unlinked:
+        db.commit()
+    return {"unlinked": unlinked}
+
+
 def match_unmatched(db, verbose: bool = False) -> dict:
     """Link every unmatched listing to a TMDb film.
 
@@ -164,6 +284,10 @@ def match_unmatched(db, verbose: bool = False) -> dict:
     fetched canonical details, so films matched on the server came back with a
     non-Hebrew title and no runtime.
     """
+    # Break any link that no longer holds before looking for new ones: a
+    # listing freed here is re-matched by this same pass, in this same run.
+    stale = unlink_stale_matches(db, verbose=verbose)
+
     pending = db.query(SourceMovieListing).filter_by(movie_id=None).all()
     matched = 0
 
@@ -214,7 +338,8 @@ def match_unmatched(db, verbose: bool = False) -> dict:
             print(f"v {listing.raw_title} -> {movie.title_he} (score: {score})")
 
     db.commit()
-    return {"considered": len(pending), "matched": matched, "spelling_variants": local}
+    return {"considered": len(pending), "matched": matched,
+            "spelling_variants": local, "unlinked": stale["unlinked"]}
 
 
 if __name__ == "__main__":

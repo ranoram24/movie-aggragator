@@ -307,12 +307,29 @@ def backfill_overviews(db, limit: int = OVERVIEW_BATCH, verbose: bool = False) -
     pages carry only "watch the trailer and buy tickets", and Hot Cinema's
     film list is four fields wide. There is nothing there to fall back to.
     """
-    from models import Movie
+    from models import Movie, Screening, SourceMovieListing
+    import localtime
 
-    pending = [
+    # Films showing now come first, and that ordering is the whole point of
+    # the batch being useful. Without it the limit was applied to every film
+    # ever stored, so a handful of titles on screen today sat behind dozens
+    # that finished their run months ago and were re-checked ahead of them --
+    # 26 descriptions were fetched in two passes and not one of them belonged
+    # to a film a reader could actually open.
+    showing = {
+        movie_id for (movie_id,) in db.query(SourceMovieListing.movie_id)
+        .join(Screening, Screening.source_movie_listing_id == SourceMovieListing.id)
+        .filter(Screening.showtime >= localtime.now_iso())
+        .filter(SourceMovieListing.movie_id.isnot(None))
+        .distinct()
+        .all()
+    }
+    candidates = [
         m for m in db.query(Movie).filter(Movie.tmdb_id.isnot(None)).all()
         if hebrew_fraction(m.overview) < HEBREW_PROSE
-    ][:limit]
+    ]
+    candidates.sort(key=lambda m: m.id not in showing)
+    pending = candidates[:limit]
     if not pending:
         return {"overviews_checked": 0, "overviews_filled": 0}
 

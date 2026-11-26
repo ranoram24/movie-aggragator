@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 from rapidfuzz import fuzz
 from database import SessionLocal
 from models import SourceMovieListing, Movie
-from titles import (normalize_title, title_segments, fold_for_compare,
-                    near_identical, shares_script)
+from titles import (hebrew_fraction, normalize_title, title_segments,
+                    fold_for_compare, near_identical, shares_script)
 
 load_dotenv()
 token = os.getenv("TMDB_TOKEN")
@@ -275,6 +275,66 @@ def unlink_stale_matches(db, verbose: bool = False) -> dict:
     return {"unlinked": unlinked}
 
 
+# A stored description counts as Hebrew above this much Hebrew lettering.
+# Mirrors api_movies.HEBREW_PROSE; both sit far clear of the two cases that
+# matter -- a French paragraph under a Hebrew heading measures 0.16, a real
+# Hebrew synopsis 1.00.
+HEBREW_PROSE = 0.5
+
+# Films re-checked per pass. Only ever those still lacking a Hebrew
+# description, so the queue shrinks as TMDb fills in rather than growing.
+OVERVIEW_BATCH = int(os.getenv("TMDB_OVERVIEW_BATCH", 25))
+
+
+def backfill_overviews(db, limit: int = OVERVIEW_BATCH, verbose: bool = False) -> dict:
+    """Fetch descriptions TMDb did not have when the film was first matched.
+
+    A film's overview is read once, at match time, in Hebrew. That is a
+    snapshot of a moving target: TMDb is community-written and a film in
+    cinemas acquires translations over the weeks it is showing. Nothing ever
+    looked again, so a film matched before anyone wrote a Hebrew synopsis kept
+    an empty one for its whole run -- "ג'ים קווין" has had 416 characters of
+    Hebrew on TMDb for some time and the card showed none of it.
+
+    English is taken when Hebrew still does not exist. It ranks below Hebrew
+    everywhere it is used (see api_movies.overview_rank), so a Hebrew synopsis
+    from a chain still wins over it, and a Hebrew one appearing on TMDb later
+    replaces it -- the re-check keys on "not Hebrew yet", not on "empty".
+
+    Deliberately NOT a chain scrape. Only Cinema City publishes synopses at
+    all: Movieland's API declares Synopsis and ShortSynopsis and leaves both
+    null on every event, Planet's film feed has no such field and its film
+    pages carry only "watch the trailer and buy tickets", and Hot Cinema's
+    film list is four fields wide. There is nothing there to fall back to.
+    """
+    from models import Movie
+
+    pending = [
+        m for m in db.query(Movie).filter(Movie.tmdb_id.isnot(None)).all()
+        if hebrew_fraction(m.overview) < HEBREW_PROSE
+    ][:limit]
+    if not pending:
+        return {"overviews_checked": 0, "overviews_filled": 0}
+
+    filled = 0
+    for movie in pending:
+        hebrew = (tmdb_details(movie.tmdb_id) or {}).get("overview") or ""
+        chosen = hebrew.strip()
+        if hebrew_fraction(chosen) < HEBREW_PROSE:
+            english = (tmdb_details(movie.tmdb_id, language="en-US") or {}).get("overview") or ""
+            # Only worth storing if it beats what is already there.
+            chosen = english.strip() if english.strip() else chosen
+        if chosen and chosen != (movie.overview or ""):
+            movie.overview = chosen
+            filled += 1
+            if verbose:
+                print(f"+ overview for {movie.title_he}: {chosen[:60]}")
+    if filled:
+        db.commit()
+        log.info("tmdb: filled %s description(s)", filled)
+    return {"overviews_checked": len(pending), "overviews_filled": filled}
+
+
 def match_unmatched(db, verbose: bool = False) -> dict:
     """Link every unmatched listing to a TMDb film.
 
@@ -338,8 +398,16 @@ def match_unmatched(db, verbose: bool = False) -> dict:
             print(f"v {listing.raw_title} -> {movie.title_he} (score: {score})")
 
     db.commit()
+    # Descriptions last: a film matched moments ago is included in the sweep.
+    try:
+        overviews = backfill_overviews(db, verbose=verbose)
+    except Exception as exc:
+        # A nice-to-have. A TMDb outage must not lose the matching above.
+        log.warning("overview backfill skipped: %s: %s", type(exc).__name__, exc)
+        overviews = {"overviews_checked": 0, "overviews_filled": 0}
+
     return {"considered": len(pending), "matched": matched,
-            "spelling_variants": local, "unlinked": stale["unlinked"]}
+            "spelling_variants": local, "unlinked": stale["unlinked"], **overviews}
 
 
 if __name__ == "__main__":

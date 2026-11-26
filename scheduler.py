@@ -294,19 +294,19 @@ async def _run_once(key: str) -> None:
                 log.warning("geocoding skipped: %s: %s", type(exc).__name__, exc)
 
         if MATCH_AFTER_SYNC:
-            try:
-                async with _write_lock:
-                    stats = await asyncio.to_thread(_hash_posters)
-                if stats.get("adopted") or stats.get("hashed"):
-                    log.info(
-                        "posters: %s hashed, %s listing(s) joined an existing film",
-                        stats.get("hashed", 0), stats.get("adopted", 0),
-                    )
-            except Exception as exc:
-                # A missing Pillow or an unreachable poster host must not fail
-                # the scrape; grouping simply stays as it was.
-                log.warning("poster grouping skipped: %s: %s", type(exc).__name__, exc)
-
+            # TMDb FIRST, posters second, and the order matters twice over.
+            #
+            # It is the authoritative signal: a title matched against TMDb
+            # carries a score, while a poster match is a guess that something
+            # looks the same. Grouping first meant a listing that could have
+            # been matched properly was sometimes adopted by a neighbour's
+            # poster before anything tried to match it.
+            #
+            # And matching now UNLINKS stale matches, clearing the poster
+            # group of anything it frees. With grouping ahead of it those
+            # listings stayed ungrouped until the next cycle two hours later,
+            # which briefly split real films onto extra cards -- visible as a
+            # jump in flagged duplicates right after a repair.
             try:
                 async with _write_lock:
                     stats = await asyncio.to_thread(_match_unmatched)
@@ -324,6 +324,20 @@ async def _run_once(key: str) -> None:
                 # Matching is a nice-to-have; a TMDb outage or a missing token
                 # must not mark the scrape itself as failed.
                 log.warning("tmdb matching skipped: %s: %s", type(exc).__name__, exc)
+
+            try:
+                async with _write_lock:
+                    stats = await asyncio.to_thread(_hash_posters)
+                if stats.get("adopted") or stats.get("hashed"):
+                    log.info(
+                        "posters: %s hashed, %s listing(s) joined an existing film",
+                        stats.get("hashed", 0), stats.get("adopted", 0),
+                    )
+            except Exception as exc:
+                # A missing Pillow or an unreachable poster host must not fail
+                # the scrape; grouping simply stays as it was.
+                log.warning("poster grouping skipped: %s: %s", type(exc).__name__, exc)
+
 
     except asyncio.CancelledError:
         status["state"] = "cancelled"

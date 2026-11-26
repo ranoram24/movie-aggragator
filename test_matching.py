@@ -22,7 +22,9 @@ from match_movies import (
     TITLE_MATCH_FLOOR,
     _agreement,
 )
-from titles import normalize_title, shares_script, title_segments
+from api_movies import overview_rank
+from titles import (hebrew_fraction, normalize_title, shares_script,
+                    title_segments)
 
 passed = 0
 failures: list[str] = []
@@ -174,6 +176,51 @@ check("the closest unlinked case misses its floor with room",
       _agreement("טרום בכורה - כבשה בקופסה",
                  FakeMovie("טרום בכורה", "טרום בכורה"))
       <= TITLE_MATCH_FLOOR - 15)
+
+
+# ---------------------------------------------------------------- synopses
+
+# A film's description used to be the first non-empty one found, which picked
+# French. Cinema City lists the French-dubbed showing of "פגוש את הכלה" as a
+# separate listing and gave it a French synopsis under the Hebrew heading
+# "תקציר בצרפתית" — summary in French. That row came back before the ordinary
+# Hebrew one, so the card showed a Hebrew reader a paragraph of French while
+# the correct text sat unused on the very next row.
+FRENCH_UNDER_HEBREW_LABEL = (
+    "תקציר בצרפתית: Un nouveau film de la franchise Mon beau-père et moi. "
+    "Le fils de Greg et Pam, Henry, décide de présenter sa fiancée Olivia."
+)
+REAL_HEBREW = "בנובמבר הקרוב, אייקון הקומדיה בן סטילר וזוכה האוסקר רוברט דה נירו מתאחדים"
+ENGLISH = "Henry, son of Greg and Pam Focker, aims to marry Olivia."
+RUSSIAN = "Генри, сын Грега и Пэм Факеров, решает жениться на девушке."
+
+# Presence of Hebrew is not enough to judge by: the French text HAS Hebrew in
+# it, which is exactly why a contains-Hebrew test would still have shown it.
+check("the french text does contain hebrew letters",
+      "תקציר" in FRENCH_UNDER_HEBREW_LABEL)
+check("but is only a sliver of hebrew by proportion",
+      hebrew_fraction(FRENCH_UNDER_HEBREW_LABEL) < 0.25)
+check("while a real hebrew synopsis is nearly all hebrew",
+      hebrew_fraction(REAL_HEBREW) > 0.9)
+eq("empty text is not hebrew", hebrew_fraction(""), 0.0)
+eq("nothing is not hebrew", hebrew_fraction(None), 0.0)
+
+eq("hebrew prose wins", overview_rank(REAL_HEBREW), 0)
+eq("english is the fallback", overview_rank(ENGLISH), 1)
+eq("the hebrew-labelled french loses", overview_rank(FRENCH_UNDER_HEBREW_LABEL), 2)
+eq("a russian dub synopsis loses", overview_rank(RUSSIAN), 2)
+
+# The card takes the lowest rank whatever order the rows arrive in, which is
+# the actual defect: the French row simply came first.
+for candidates in ([FRENCH_UNDER_HEBREW_LABEL, REAL_HEBREW],
+                   [REAL_HEBREW, FRENCH_UNDER_HEBREW_LABEL],
+                   [RUSSIAN, FRENCH_UNDER_HEBREW_LABEL, REAL_HEBREW, ENGLISH]):
+    eq(f"hebrew chosen from {len(candidates)} candidates regardless of order",
+       min(candidates, key=overview_rank), REAL_HEBREW)
+
+# With no Hebrew at all, English beats a dub language rather than nothing.
+eq("english beats russian when there is no hebrew",
+   min([RUSSIAN, ENGLISH], key=overview_rank), ENGLISH)
 
 
 print(f"\n{passed} passed, {len(failures)} failed")

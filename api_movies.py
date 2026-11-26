@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 
 import localtime
 from database import SessionLocal
-from titles import normalize_title, title_slug
+from titles import hebrew_fraction, normalize_title, scripts_in, title_slug
 from models import (CinemaSource, DigitalRelease, Movie, Screening,
                     SourceMovieListing, Theatre)
 
@@ -160,6 +160,40 @@ FOREIGN_SCRIPT_RE = re.compile(r"[Ѐ-ӿ؀-ۿ]")
 # a 295x425 crop, Cinema City only 236x350.
 CHAIN_POSTER_ORDER = {"planet": 0, "hot_cinema": 1, "movieland": 2,
                       "cinema_city": 3, "lev": 4}
+
+
+# A synopsis is Hebrew prose above this much Hebrew lettering. Set well clear
+# of both sides: the French text below measures 0.16, a real Hebrew synopsis
+# 1.00.
+HEBREW_PROSE = 0.5
+
+
+def overview_rank(text: str) -> int:
+    """Sort key for choosing a film's description. Lower wins.
+
+    Ranked rather than first-come, because first-come picked French.
+    Cinema City lists the French-dubbed showing of "פגוש את הכלה" as its own
+    listing and gave it a French synopsis under the Hebrew heading
+    "תקציר בצרפתית" -- summary in French. That listing happened to come back
+    before the ordinary Hebrew one, so the card showed a Hebrew reader a
+    paragraph of French while the correct text sat unused on the next row.
+
+    The dubbed listings are merged onto one card on purpose -- that is how a
+    film plays in three languages without becoming three cards -- so their
+    descriptions are always going to be in the dub's language and always have
+    to lose to a Hebrew one.
+
+    Latin text ranks second rather than last: for an Israeli audience English
+    is a reasonable fallback, and it cannot be told apart from French by
+    script alone. Anything else -- a Russian synopsis, or the mixed
+    Hebrew-labelled French above -- ranks last and is only shown when a film
+    has nothing else at all.
+    """
+    if hebrew_fraction(text) >= HEBREW_PROSE:
+        return 0
+    if scripts_in(text) == {"en"}:
+        return 1
+    return 2
 
 
 def poster_rank(listing: SourceMovieListing, chain_key: str) -> tuple:
@@ -529,6 +563,7 @@ def movie_detail(
                 "age_rating": None, "original_language": None,
                 "digital_date": None}
         poster_candidates: list[tuple] = []
+        overview_candidates: list[tuple[int, str]] = []
         tmdb_poster = None
 
         for screening, listing, theatre, source, movie in matching:
@@ -545,15 +580,11 @@ def movie_detail(
                     (poster_rank(listing, source.key), listing.poster_url)
                 )
             tmdb_poster = tmdb_poster or (movie.poster_url if movie else None)
-            # TMDb first, then whichever chain published a description. TMDb
-            # carries no Hebrew overview for a fair number of films and none at
-            # all for anything it could not match, which is why some cards had
-            # a synopsis and some did not.
-            meta["overview"] = (
-                meta["overview"]
-                or (movie.overview if movie else None)
-                or listing.synopsis
-            )
+            # Every description this film has, ranked after the loop rather
+            # than taking the first non-empty one. See overview_rank.
+            for text in ((movie.overview if movie else None), listing.synopsis):
+                if text and text.strip():
+                    overview_candidates.append((overview_rank(text), text.strip()))
             meta["genre"] = meta["genre"] or listing.genre
             meta["runtime_minutes"] = meta["runtime_minutes"] or listing.runtime_minutes
             meta["age_rating"] = meta["age_rating"] or listing.age_rating
@@ -612,6 +643,8 @@ def movie_detail(
                                      t.name))
 
         meta["poster_url"] = best_poster(poster_candidates, tmdb_poster)
+        if overview_candidates:
+            meta["overview"] = min(overview_candidates, key=lambda c: c[0])[1]
         return MovieDetail(id=film_id, theatres=theatres, **meta)
     finally:
         db.close()

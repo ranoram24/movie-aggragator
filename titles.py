@@ -249,3 +249,30 @@ def shares_script(a: str | None, b: str | None) -> bool:
     ones.
     """
     return bool(scripts_in(a) & scripts_in(b))
+
+
+# Letters only: punctuation, digits and spaces say nothing about language.
+_HEBREW_LETTER_RE = re.compile(r"[\u0590-\u05ff]")
+_ANY_LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
+
+
+def hebrew_fraction(text: str | None) -> float:
+    """How much of a string's lettering is Hebrew, from 0 to 1.
+
+    A presence test is not enough, which is the whole reason this exists. A
+    chain published a French synopsis under the Hebrew heading
+    "תקציר בצרפתית:" -- summary in French -- so the text contains Hebrew
+    letters and is almost entirely French. Anything asking merely "does this
+    have Hebrew in it" says yes and shows a Hebrew reader a paragraph of
+    French.
+
+    Measuring the proportion separates them cleanly: that string is about 8%
+    Hebrew, while a real Hebrew synopsis is upwards of 95%.
+    """
+    if not text:
+        return 0.0
+    letters = _ANY_LETTER_RE.findall(text)
+    if not letters:
+        return 0.0
+    hebrew = sum(1 for ch in letters if _HEBREW_LETTER_RE.match(ch))
+    return hebrew / len(letters)
